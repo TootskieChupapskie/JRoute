@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "596013625861",
+    "project_id": "jroute-18648",
+    "storage_bucket": "jroute-18648.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:596013625861:android:bca1b047fb3676f6efe26c",
+        "android_client_info": {
+          "package_name": "com.companyname.jroute"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAJus42gpqM1c0OiFtxeUvkDfiiN2_oCME"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

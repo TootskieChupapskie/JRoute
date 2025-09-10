@@ -1,0 +1,215 @@
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:maps="clr-namespace:Microsoft.Maui.Controls.Maps;assembly=Microsoft.Maui.Controls.Maps"
+             x:Class="JRoute.Pages.Conductor.Conductor"
+             Padding="0">
+
+  <Grid>
+    <!-- Fullscreen map -->
+    <maps:Map x:Name="MyMap" MapType="Street" IsShowingUser="True" />
+
+    <!-- Bottom Sheet: edge-to-edge, rounded top only, no outline -->
+    <Border x:Name="BottomSheet"
+            ZIndex="1"
+            BackgroundColor="White"
+            Padding="20"
+            Margin="0"
+            HorizontalOptions="FillAndExpand"
+            VerticalOptions="End"
+            StrokeThickness="0">
+    <Border.StrokeShape>
+        <RoundRectangle CornerRadius="30,30,0,0" />
+    </Border.StrokeShape>
+
+    <VerticalStackLayout Spacing="0">
+        <!-- Grabber (only this toggles collapse/expand) -->
+        <BoxView x:Name="Grabber"
+                HeightRequest="8"
+                WidthRequest="56"
+                HorizontalOptions="Center"
+                CornerRadius="4"
+                BackgroundColor="Gray"
+                Margin="0,8,0,12">
+        <BoxView.GestureRecognizers>
+            <TapGestureRecognizer Tapped="OnGrabberTapped"/>
+        </BoxView.GestureRecognizers>
+        </BoxView>
+
+        <BoxView HeightRequest="12" BackgroundColor="Transparent" />
+
+        <!-- Sheet body (hidden when collapsed) -->
+        <VerticalStackLayout x:Name="SheetContent" Spacing="15">
+
+       <!-- Choose Route (inline ghost suggestion rendered over Entry) -->
+        <Border BackgroundColor="#F7B731" StrokeThickness="0"
+                HorizontalOptions="Center" WidthRequest="250" Padding="12,8">
+        <Border.StrokeShape><RoundRectangle CornerRadius="30" /></Border.StrokeShape>
+
+        <Grid Padding="16,0">
+        <Entry x:Name="RouteEntry"
+                Placeholder="CHOOSE ROUTE"
+                FontFamily="MontserratSemi"
+                FontAttributes="Bold"
+                BackgroundColor="Transparent"
+                TextColor="#01FFFFFF"         
+                PlaceholderColor="#FFFFFFFF"
+                HorizontalTextAlignment="Center"
+                Focused="OnEntryFocused"
+                Unfocused="OnEntryUnfocused"
+                ReturnType="Go"
+                Completed="OnRouteCompleted"
+                TextChanged="OnRouteTextChanged" />
+
+        <Label x:Name="RouteOverlay"
+                ZIndex="100"
+                InputTransparent="True"
+                HorizontalOptions="FillAndExpand"
+                HorizontalTextAlignment="Center"
+                VerticalOptions="Center"
+                LineBreakMode="NoWrap"
+                FontFamily="MontserratSemi"
+                FontAttributes="Bold"
+                FontSize="{Binding FontSize, Source={x:Reference RouteEntry}}" />
+        </Grid>
+        </Border>
+
+        <!-- MAX NO. OF SEATS -->
+        <Border BackgroundColor="#4AB7E5"
+                StrokeThickness="0"
+                HorizontalOptions="Center"
+                WidthRequest="250"
+                Padding="12,8">
+            <Border.StrokeShape><RoundRectangle CornerRadius="30" /></Border.StrokeShape>
+            <Entry x:Name="SeatsEntry"
+                Placeholder="MAX NO. OF SEATS"
+                FontAttributes="Bold"
+                BackgroundColor="Transparent"
+                TextColor="White"
+                PlaceholderColor="#ffffffff"
+                Visual="Default"
+                HorizontalTextAlignment="Center"
+                Keyboard="Numeric"
+                MaxLength="3"
+                Focused="OnEntryFocused"
+                Unfocused="OnEntryUnfocused"
+                TextChanged="OnSeatsTextChanged" />
+        </Border>
+
+        <Button Text="BIYAHE!"
+                BackgroundColor="#007F3F"
+                FontAttributes="Bold"
+                TextColor="White"
+                CornerRadius="30"
+                WidthRequest="150"
+                HorizontalOptions="Center"
+                Clicked="OnBiyaheClicked"/>
+        </VerticalStackLayout>
+
+    </VerticalStackLayout>
+    </Border>
+
+    <!-- Recenter button (circular pin) -->
+    <Border x:Name="RecenterButton"
+            ZIndex="2"
+            WidthRequest="56" HeightRequest="56"
+            BackgroundColor="White" StrokeThickness="0"
+            HorizontalOptions="End" VerticalOptions="End"
+            Margin="0,0,12,12">
+    <Border.StrokeShape>
+        <RoundRectangle CornerRadius="28"/>
+    </Border.StrokeShape>
+    <Path Data="M12,2 C7.58,2 4,5.58 4,10 C4,15.25 12,22 12,22 C12,22 20,15.25 20,10 C20,5.58 16.42,2 12,2 Z M12,13 A3,3 0 1,1 12,7 A3,3 0 0,1 12,13 Z"
+            Fill="#333" WidthRequest="22" HeightRequest="22"
+            HorizontalOptions="Center" VerticalOptions="Center"/>
+    <Border.GestureRecognizers>
+        <TapGestureRecognizer Tapped="OnRecenterTapped"/>
+    </Border.GestureRecognizers>
+    </Border>
+
+
+
+    <!-- Passenger bar (3 squares, icons perfectly centered) -->
+    <HorizontalStackLayout x:Name="PassengerBar"
+                        IsVisible="False"
+                        Spacing="20"
+                        Padding="0,0,0,24"
+                        HorizontalOptions="Center"
+                        VerticalOptions="End">
+
+    <!-- DECREMENT -->
+    <Border x:Name="DecrementTile" WidthRequest="84" HeightRequest="84" BackgroundColor="White" StrokeThickness="0">
+    <Border.StrokeShape><RoundRectangle CornerRadius="30" /></Border.StrokeShape>
+    <Border.GestureRecognizers>
+        <TapGestureRecognizer Tapped="OnDecrementTapped"/>
+    </Border.GestureRecognizers>
+
+    <AbsoluteLayout>
+        <!-- Person (centered, slightly smaller, thicker stroke) -->
+        <Path
+        Data="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+        Stroke="#E53935" StrokeThickness="3.5" StrokeLineJoin="Round" StrokeLineCap="Round"
+        Aspect="Uniform" WidthRequest="28" HeightRequest="28"
+        AbsoluteLayout.LayoutBounds="0.5,0.5,AutoSize,AutoSize"
+        AbsoluteLayout.LayoutFlags="PositionProportional" />
+
+        <!-- Minus badge (closer to person, not corner) -->
+        <Path
+        Data="M5 13h14v-2H5v2z"
+        Fill="#E53935" WidthRequest="18" HeightRequest="18"
+        AbsoluteLayout.LayoutBounds="0.72,0.72,AutoSize,AutoSize"
+        AbsoluteLayout.LayoutFlags="PositionProportional" />
+    </AbsoluteLayout>
+    </Border>
+
+    <!-- Center (bigger) -->
+    <Border WidthRequest="132" HeightRequest="132" BackgroundColor="White" StrokeThickness="0">
+        <Border.StrokeShape><RoundRectangle CornerRadius="30" /></Border.StrokeShape>
+
+        <AbsoluteLayout>
+
+        <!-- Count top-center -->
+        <Label x:Name="PassengerCountLabel"
+                Text="0/0" FontAttributes="Bold" TextColor="Black"
+                AbsoluteLayout.LayoutBounds="0.5,0.12,AutoSize,AutoSize"
+                AbsoluteLayout.LayoutFlags="PositionProportional" />
+
+        <!-- Person (perfect center) -->
+        <Path Data="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+                Stroke="#333333" StrokeThickness="3.5" Aspect="Uniform"
+                WidthRequest="50" HeightRequest="50"
+                AbsoluteLayout.LayoutBounds="0.5,0.5,AutoSize,AutoSize"
+                AbsoluteLayout.LayoutFlags="PositionProportional" />
+        </AbsoluteLayout>
+    </Border>
+
+    <!-- INCREMENT -->
+    <Border x:Name="IncrementTile" WidthRequest="84" HeightRequest="84" BackgroundColor="White" StrokeThickness="0">
+    <Border.StrokeShape><RoundRectangle CornerRadius="30" /></Border.StrokeShape>
+    <Border.GestureRecognizers>
+        <TapGestureRecognizer Tapped="OnIncrementTapped"/>
+    </Border.GestureRecognizers>
+
+    <AbsoluteLayout>
+        <!-- Person (fixed path, centered, thicker stroke) -->
+        <Path
+        Data="M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z"
+        Stroke="#2E7D32" StrokeThickness="3.5" StrokeLineJoin="Round" StrokeLineCap="Round"
+        Aspect="Uniform" WidthRequest="28" HeightRequest="28"
+        AbsoluteLayout.LayoutBounds="0.5,0.5,AutoSize,AutoSize"
+        AbsoluteLayout.LayoutFlags="PositionProportional" />
+
+        <!-- Plus badge (closer to person, not corner) -->
+        <Path
+        Data="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"
+        Fill="#2E7D32" WidthRequest="18" HeightRequest="18"
+        AbsoluteLayout.LayoutBounds="0.72,0.72,AutoSize,AutoSize"
+        AbsoluteLayout.LayoutFlags="PositionProportional" />
+    </AbsoluteLayout>
+    </Border>
+    </HorizontalStackLayout>
+
+
+
+
+  </Grid>
+</ContentPage>

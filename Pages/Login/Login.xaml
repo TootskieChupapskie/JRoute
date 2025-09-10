@@ -1,0 +1,58 @@
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             x:Class="JRoute.Pages.Login.Login"
+             BackgroundColor="White"
+             NavigationPage.HasNavigationBar="False">
+    <Grid RowSpacing="0">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header: Davao SVG -->
+    <Image x:Name="DavaoImage"
+           Source="Resources/Images/davao.svg"
+           HorizontalOptions="Center"
+           Margin="0,40,0,0"
+           Grid.Row="0" />
+
+        <!-- Centered Buttons -->
+    <VerticalStackLayout x:Name="ButtonStack" Spacing="35" Grid.Row="1" VerticalOptions="Center" HorizontalOptions="Center">
+        <Button x:Name="ConductorButton"
+            Text="Conductor"
+            FontAttributes="Bold"
+            BackgroundColor="#29ABE2"
+            TextColor="White"
+            CornerRadius="30"
+            FontSize="20"
+            HeightRequest="56"
+            HorizontalOptions="Center" />
+        <Button x:Name="CommuterButton"
+            Text="Commuter"
+            FontAttributes="Bold"
+            BackgroundColor="#F7B731"
+            TextColor="White"
+            CornerRadius="30"
+            FontSize="20"
+            HeightRequest="56"
+            HorizontalOptions="Center" />
+    </VerticalStackLayout>
+
+        <!-- Footer -->
+     <VerticalStackLayout x:Name="FooterStack" Grid.Row="2" VerticalOptions="End" HorizontalOptions="Center" Spacing="4">
+         <Label x:Name="FooterTitle" Text="Madayaw Dabaw!"
+             TextColor="#E71D73"
+             FontSize="18"
+             FontAttributes="Bold"
+             HorizontalOptions="Center"
+             HorizontalTextAlignment="Center" />
+         <Label x:Name="FooterSubtitle" Text="Smarter ways to travel."
+             TextColor="#007F3F"
+             FontSize="14"
+             HorizontalOptions="Center"
+             HorizontalTextAlignment="Center" 
+             Margin="0,0,0,40"/>
+     </VerticalStackLayout>
+    </Grid>
+</ContentPage>

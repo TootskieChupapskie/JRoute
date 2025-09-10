@@ -1,0 +1,12 @@
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Jroute.csproj.AssemblyReference.cache
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\mauiimage.inputs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\mauifont.inputs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\mauisplash.inputs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\mauimanifest.stamp
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Platforms\Windows\App.g.i.cs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Platforms\Windows\App.g.cs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\XamlTypeInfo.g.cs
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Platforms\Windows\App.xaml
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Platforms\Windows\App.xbf
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\XamlSaveStateFile.xml
+D:\Code\Jroute\obj\Debug\net9.0-windows10.0.19041.0\win10-x64\Jroute.GeneratedMSBuildEditorConfig.editorconfig

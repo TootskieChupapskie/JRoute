@@ -1,0 +1,40 @@
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:maps="clr-namespace:Microsoft.Maui.Controls.Maps;assembly=Microsoft.Maui.Controls.Maps"
+             x:Class="JRoute.Pages.Commuter.Commuter">
+
+    <Grid>
+        <!-- ✅ Fullscreen Map -->
+        <maps:Map x:Name="MyMap"
+                  MapType="Street"
+                  IsShowingUser="True" />
+
+        <!-- ✅ Top Layer: Point A → Point B pill textfields -->
+        <StackLayout Padding="20,40,20,0"
+                     Spacing="10"
+                     VerticalOptions="Start">
+
+            <!-- Point A -->
+            <Frame BackgroundColor="#4AB7E5"
+                   CornerRadius="30"
+                   HasShadow="True"
+                   Padding="0">
+                <Entry Placeholder="Point A"
+                        PlaceholderColor="#ffffffff"
+                       ClearButtonVisibility="WhileEditing"
+                       Margin="10,5" />
+            </Frame>
+
+            <!-- Point B -->
+            <Frame BackgroundColor="#F7B731"
+                   CornerRadius="30"
+                   HasShadow="True"
+                   Padding="0">
+                <Entry Placeholder="Point B"
+                       PlaceholderColor="#ffffffff"
+                       ClearButtonVisibility="WhileEditing"
+                       Margin="10,5" />
+            </Frame>
+        </StackLayout>
+    </Grid>
+</ContentPage>
