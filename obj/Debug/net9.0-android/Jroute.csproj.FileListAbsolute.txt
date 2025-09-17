@@ -1476,3 +1476,4 @@ D:\Code\JRoute\obj\Debug\net9.0-android\android\assets\x86_64\zh-Hans\Microsoft.
 D:\Code\JRoute\obj\Debug\net9.0-android\android\assets\x86_64\zh-Hant\Microsoft.Maui.Controls.resources.dll
 D:\Code\JRoute\obj\Debug\net9.0-android\android\assets\x86_64\zh-HK\Microsoft.Maui.Controls.resources.dll
 D:\Code\JRoute\obj\Debug\net9.0-android\android\assets\x86_64\_Microsoft.Android.Resource.Designer.dll
+D:\Code\JRoute\obj\Debug\net9.0-android\Jroute.sourcelink.json

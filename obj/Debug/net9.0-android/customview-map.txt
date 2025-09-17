@@ -252,7 +252,6 @@ monochrome;obj\Debug\net9.0-android\resizetizer\r\mipmap-anydpi-v26\appicon.xml
 padding;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_google_signin_btn_icon_disabled.xml
 padding;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_google_signin_btn_text_disabled.xml
 paths;D:\Code\JRoute\obj\Debug\net9.0-android\lp\165\jl\res\xml\microsoft_maui_essentials_fileprovider_file_paths.xml
-resources;D:\Code\JRoute\obj\Debug\net9.0-android\googsvcsjson\values\goog_svcs_json.xml
 resources;D:\Code\JRoute\obj\Debug\net9.0-android\lp\162\jl\res\values\strings.xml
 resources;D:\Code\JRoute\obj\Debug\net9.0-android\lp\163\jl\res\values\values.xml
 resources;D:\Code\JRoute\obj\Debug\net9.0-android\lp\164\jl\res\values-v35\styles.xml
@@ -451,7 +450,6 @@ solid;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_goog
 solid;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_google_signin_btn_text_dark_focused.xml
 solid;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_google_signin_btn_text_disabled.xml
 solid;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\drawable\common_google_signin_btn_text_light_focused.xml
-string;D:\Code\JRoute\obj\Debug\net9.0-android\googsvcsjson\values\goog_svcs_json.xml
 string;D:\Code\JRoute\obj\Debug\net9.0-android\lp\162\jl\res\values\strings.xml
 string;D:\Code\JRoute\obj\Debug\net9.0-android\lp\163\jl\res\values\values.xml
 string;D:\Code\JRoute\obj\Debug\net9.0-android\lp\174\jl\res\values-af\values.xml

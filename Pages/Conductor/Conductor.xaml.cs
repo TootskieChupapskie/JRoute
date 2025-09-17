@@ -40,8 +40,8 @@ public partial class Conductor : ContentPage
 
     private readonly List<string> _routeDictionary = new()
     {
-        "El Rio", "Toril", "Sasa", "Tibungco", "Route 1",
-        "Route 2", "Route 3", "Route 4", "Route 5", "Route 6"
+        "Bago Aplaya", "Bankal", "Barrio Obrero", "Buhangin Via Dacudao", "Buhangin Via Jp Laurel", "Bunawan Via Buhangin", "Bunawan Via Sasa"
+        "Calinan", "Camp Catitipan Via Jp Laurel", "Catalunan Grande", "Ecoland", "El Rio", "Toril"
     };
 
     private void UpdatePassengerUI()
@@ -197,8 +197,6 @@ public partial class Conductor : ContentPage
         RouteOverlay.FormattedText = fs.Spans.Count > 0 ? fs : null;
         RouteOverlay.IsVisible = fs.Spans.Count > 0;
     }
-
-
     
     private void UpdateRouteOverlay(string typedUpper)
     {
