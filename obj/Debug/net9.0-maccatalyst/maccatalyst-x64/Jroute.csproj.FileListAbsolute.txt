@@ -39,3 +39,9 @@ D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\Jroute.GeneratedMSBu
 D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\Jroute.AssemblyInfoInputs.cache
 D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\Jroute.AssemblyInfo.cs
 D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\Jroute.csproj.CoreCompileInputs.cache
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\resizetizer\f\Montserrat-Bold.ttf
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\resizetizer\f\Montserrat-ExtraBold.ttf
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\resizetizer\f\Montserrat-Medium.ttf
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\resizetizer\f\Montserrat-Regular.ttf
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\resizetizer\f\Montserrat-SemiBold.ttf
+D:\Code\JRoute\obj\Debug\net9.0-maccatalyst\maccatalyst-x64\Jroute.sourcelink.json

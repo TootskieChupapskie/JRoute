@@ -40,8 +40,8 @@ public partial class Conductor : ContentPage
 
     private readonly List<string> _routeDictionary = new()
     {
-        "Bago Aplaya", "Bankal", "Barrio Obrero", "Buhangin Via Dacudao", "Buhangin Via Jp Laurel", "Bunawan Via Buhangin", "Bunawan Via Sasa"
-        "Calinan", "Camp Catitipan Via Jp Laurel", "Catalunan Grande", "Ecoland", "El Rio", "Toril"
+        "Bago Aplaya", "Bankal", "Barrio Obrero", "Buhangin Via Dacudao", "Buhangin Via JP. Laurel", "Bunawan Via Buhangin", "Bunawan Via Sasa",
+        "Calinan", "Camp Catitipan Via JP. Laurel", "Catalunan Grande", "Ecoland", "El Rio", "Toril"
     };
 
     private void UpdatePassengerUI()
@@ -77,9 +77,10 @@ public partial class Conductor : ContentPage
     private async void OnBiyaheClicked(object sender, EventArgs e)
     {
         var route = (RouteEntry.Text ?? string.Empty).Trim();
-        if (string.IsNullOrWhiteSpace(route))
+        var capacityText = (SeatsEntry.Text ?? string.Empty).Trim();
+        if (string.IsNullOrWhiteSpace(route) || string.IsNullOrWhiteSpace(capacityText))
         {
-            await DisplayAlert("Route", "Type a route first.", "OK");
+            await DisplayAlert(null ,"Fill in all Fields", "OK");
             return;
         }
 

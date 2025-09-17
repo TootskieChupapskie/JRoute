@@ -19,7 +19,7 @@
                    CornerRadius="30"
                    HasShadow="True"
                    Padding="0">
-                <Entry Placeholder="Point A"
+                <Entry Placeholder="Start Location"
                         PlaceholderColor="#ffffffff"
                        ClearButtonVisibility="WhileEditing"
                        Margin="10,5" />
@@ -30,7 +30,7 @@
                    CornerRadius="30"
                    HasShadow="True"
                    Padding="0">
-                <Entry Placeholder="Point B"
+                <Entry Placeholder="End Location"
                        PlaceholderColor="#ffffffff"
                        ClearButtonVisibility="WhileEditing"
                        Margin="10,5" />
