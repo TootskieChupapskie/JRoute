@@ -4,46 +4,129 @@
              x:Class="JRoute.Pages.Commuter.Commuter">
 
     <Grid>
-        <!-- ✅ Fullscreen Map -->
+        <!-- Fullscreen Map -->
         <maps:Map x:Name="MyMap"
                   MapType="Street"
                   IsShowingUser="True" />
 
-        <!-- ✅ Top Layer: Point A → Point B pill textfields -->
-        <StackLayout Padding="20,40,20,0"
-                     VerticalOptions="Start">
-
-            <!-- Point A -->
-            <Border BackgroundColor="#4AB7E5"
-                    StrokeThickness="0">
+        <!-- Search Container -->
+        <StackLayout x:Name="SearchContainer"
+                     VerticalOptions="Start"
+                     HorizontalOptions="FillAndExpand"
+                     Margin="25,40,25,0"
+                     Spacing="0">
+            
+            <!-- Search Box -->
+            <Border BackgroundColor="White"
+                    StrokeThickness="0"
+                    Padding="5,0,5,0">
                 <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="30,30,0,0" />
+                    <RoundRectangle CornerRadius="30" />
                 </Border.StrokeShape>
                 <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.3" Radius="5" Offset="0,2" />
+                    <Shadow Brush="Black" Opacity="0.2" Radius="8" Offset="0,3" />
                 </Border.Shadow>
-                <Entry Placeholder="Point A"
-                    PlaceholderColor="#ffffffff"
-                    BackgroundColor="Transparent"
-                    ClearButtonVisibility="WhileEditing"
-                    Margin="10,5" />
+                
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    
+                    <!-- Magnifying Glass Icon -->
+                    <Path Grid.Column="0"
+                          Data="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"
+                          Fill="#999999"
+                          WidthRequest="20"
+                          HeightRequest="20"
+                          VerticalOptions="Center"
+                          Margin="15,0,8,0" />
+                    
+                    <Entry x:Name="SearchEntry"
+                           Grid.Column="1"
+                           Placeholder="Search destination"
+                           PlaceholderColor="#999999"
+                           BackgroundColor="Transparent"
+                           TextColor="Black"
+                           ClearButtonVisibility="WhileEditing"
+                           FontSize="16"
+                           Margin="0,12,15,12"
+                           Focused="OnSearchFocused"
+                           Unfocused="OnSearchUnfocused"
+                           TextChanged="OnSearchTextChanged" />
+                </Grid>
             </Border>
 
-            <!-- Point B -->
-            <Border BackgroundColor="#F7B731"
-                    StrokeThickness="0">
+            <!-- Suggestions Dropdown -->
+            <Border x:Name="SuggestionsDropdown"
+                    BackgroundColor="White"
+                    StrokeThickness="0"
+                    IsVisible="False"
+                    Margin="0,5,0,0">
                 <Border.StrokeShape>
-                    <RoundRectangle CornerRadius="0,0,30,30" />
+                    <RoundRectangle CornerRadius="15" />
                 </Border.StrokeShape>
                 <Border.Shadow>
-                    <Shadow Brush="Black" Opacity="0.3" Radius="5" Offset="0,2" />
+                    <Shadow Brush="Black" Opacity="0.15" Radius="6" Offset="0,2" />
                 </Border.Shadow>
-                <Entry Placeholder="End Location"
-                    PlaceholderColor="#ffffffff"
-                    BackgroundColor="Transparent"
-                    ClearButtonVisibility="WhileEditing"
-                    Margin="10,5" />
+                
+                <CollectionView x:Name="SuggestionsCollectionView"
+                                MaximumHeightRequest="300"
+                                SelectionMode="Single"
+                                SelectionChanged="OnSuggestionSelected">
+                    <CollectionView.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Padding="15,12" BackgroundColor="Transparent">
+                                <Grid.GestureRecognizers>
+                                    <TapGestureRecognizer Tapped="OnSuggestionTapped" />
+                                </Grid.GestureRecognizers>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                
+                                <!-- Location Icon -->
+                                <Path Grid.Column="0"
+                                      Data="M12,2C8.13,2 5,5.13 5,9C5,14.25 12,22 12,22C12,22 19,14.25 19,9C19,5.13 15.87,2 12,2M12,11.5A2.5,2.5 0 0,1 9.5,9A2.5,2.5 0 0,1 12,6.5A2.5,2.5 0 0,1 14.5,9A2.5,2.5 0 0,1 12,11.5Z"
+                                      Fill="#666666"
+                                      WidthRequest="18"
+                                      HeightRequest="18"
+                                      VerticalOptions="Center"
+                                      Margin="0,0,12,0" />
+                                
+                                <StackLayout Grid.Column="1" Spacing="2">
+                                    <Label Text="{Binding Name}"
+                                           FontSize="16"
+                                           TextColor="Black"
+                                           FontAttributes="None" />
+                                    <Label Text="{Binding Address}"
+                                           FontSize="13"
+                                           TextColor="#666666"
+                                           LineBreakMode="TailTruncation" />
+                                </StackLayout>
+                            </Grid>
+                        </DataTemplate>
+                    </CollectionView.ItemTemplate>
+                </CollectionView>
             </Border>
         </StackLayout>
+
+        <!-- Recenter button (circular pin) -->
+        <Border x:Name="RecenterButton"
+                ZIndex="2"
+                WidthRequest="56" HeightRequest="56"
+                BackgroundColor="White" StrokeThickness="0"
+                HorizontalOptions="End" VerticalOptions="End"
+                Margin="0,0,12,20">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="28"/>
+            </Border.StrokeShape>
+            <Path Data="M12,2 C7.58,2 4,5.58 4,10 C4,15.25 12,22 12,22 C12,22 20,15.25 20,10 C20,5.58 16.42,2 12,2 Z M12,13 A3,3 0 1,1 12,7 A3,3 0 0,1 12,13 Z"
+                  Fill="#333" WidthRequest="22" HeightRequest="22"
+                  HorizontalOptions="Center" VerticalOptions="Center"/>
+            <Border.GestureRecognizers>
+                <TapGestureRecognizer Tapped="OnRecenterTapped"/>
+            </Border.GestureRecognizers>
+        </Border>
     </Grid>
 </ContentPage>

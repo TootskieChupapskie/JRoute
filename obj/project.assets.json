@@ -34926,6 +34926,7 @@
       "Microsoft.Maui.Controls >= 9.0.82",
       "Microsoft.Maui.Controls.Maps >= 9.0.100",
       "Microsoft.NET.ILLink.Tasks >= 9.0.8",
+      "Newtonsoft.Json >= 13.0.3",
       "Supabase >= 1.1.1"
     ],
     "net9.0-ios18.5": [
@@ -34933,6 +34934,7 @@
       "Microsoft.Maui.Controls >= 9.0.82",
       "Microsoft.Maui.Controls.Maps >= 9.0.100",
       "Microsoft.NET.ILLink.Tasks >= 9.0.8",
+      "Newtonsoft.Json >= 13.0.3",
       "Supabase >= 1.1.1"
     ],
     "net9.0-maccatalyst18.5": [
@@ -34940,12 +34942,14 @@
       "Microsoft.Maui.Controls >= 9.0.82",
       "Microsoft.Maui.Controls.Maps >= 9.0.100",
       "Microsoft.NET.ILLink.Tasks >= 9.0.8",
+      "Newtonsoft.Json >= 13.0.3",
       "Supabase >= 1.1.1"
     ],
     "net9.0-windows10.0.19041": [
       "Microsoft.Extensions.Logging.Debug >= 9.0.5",
       "Microsoft.Maui.Controls >= 9.0.82",
       "Microsoft.Maui.Controls.Maps >= 9.0.100",
+      "Newtonsoft.Json >= 13.0.3",
       "Supabase >= 1.1.1"
     ]
   },
@@ -35034,6 +35038,10 @@
             "version": "[9.0.8, )",
             "autoReferenced": true
           },
+          "Newtonsoft.Json": {
+            "target": "Package",
+            "version": "[13.0.3, )"
+          },
           "Supabase": {
             "target": "Package",
             "version": "[1.1.1, )"
@@ -35080,6 +35088,10 @@
             "target": "Package",
             "version": "[9.0.8, )",
             "autoReferenced": true
+          },
+          "Newtonsoft.Json": {
+            "target": "Package",
+            "version": "[13.0.3, )"
           },
           "Supabase": {
             "target": "Package",
@@ -35128,6 +35140,10 @@
             "version": "[9.0.8, )",
             "autoReferenced": true
           },
+          "Newtonsoft.Json": {
+            "target": "Package",
+            "version": "[13.0.3, )"
+          },
           "Supabase": {
             "target": "Package",
             "version": "[1.1.1, )"
@@ -35169,6 +35185,10 @@
           "Microsoft.Maui.Controls.Maps": {
             "target": "Package",
             "version": "[9.0.100, )"
+          },
+          "Newtonsoft.Json": {
+            "target": "Package",
+            "version": "[13.0.3, )"
           },
           "Supabase": {
             "target": "Package",
