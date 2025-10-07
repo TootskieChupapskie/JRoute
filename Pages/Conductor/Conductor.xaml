@@ -51,7 +51,7 @@
                 FontFamily="MontserratSemi"
                 FontAttributes="Bold"
                 BackgroundColor="Transparent"
-                TextColor="#01FFFFFF"         
+                TextColor="White"         
                 PlaceholderColor="#FFFFFFFF"
                 HorizontalTextAlignment="Center"
                 Focused="OnEntryFocused"
@@ -61,15 +61,15 @@
                 TextChanged="OnRouteTextChanged" />
 
         <Label x:Name="RouteOverlay"
-                ZIndex="100"
                 InputTransparent="True"
-                HorizontalOptions="FillAndExpand"
+                HorizontalOptions="Fill"
                 HorizontalTextAlignment="Center"
                 VerticalOptions="Center"
                 LineBreakMode="NoWrap"
                 FontFamily="MontserratSemi"
                 FontAttributes="Bold"
-                FontSize="{Binding FontSize, Source={x:Reference RouteEntry}}" />
+                FontSize="{Binding FontSize, Source={x:Reference RouteEntry}}"
+                TextColor="#66FFFFFF" />
         </Grid>
         </Border>
 

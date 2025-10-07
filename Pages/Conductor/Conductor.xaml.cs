@@ -7,40 +7,41 @@ using Microsoft.Maui.Maps;
 using Microsoft.Maui.Devices.Sensors;
 using Microsoft.Maui.Controls;
 using Microsoft.Maui.Graphics;
-using Supabase; // for Client
-using Microsoft.Extensions.DependencyInjection; // to resolve services
+using Supabase;
+using Microsoft.Extensions.DependencyInjection;
 using System.Text.RegularExpressions;
 
 namespace JRoute.Pages.Conductor;
 
 public partial class Conductor : ContentPage
 {
-    private const string StorageBucket = "Jroute";   // <-- change if your bucket is different
-    private const string StoragePrefix = "routes/";  // folder path inside the bucket
+    private const string StorageBucket = "Jroute";
+    private const string StoragePrefix = "routes/";
     private string? _lastRenderedPath;
     private List<Location> _routePath = new();
     private readonly List<Microsoft.Maui.Controls.Maps.Polyline> _guideDashes = new();
     private const double OnRouteThresholdMeters = 15.0;
-    private int _passengerCount = 0;   // was 1
-    private int _capacity = 0;         // will be set from SeatsEntry
+    private int _passengerCount = 0;
+    private int _capacity = 0;
     private bool _isCollapsed;
     private double _expandedHeight;
     private double _collapsedHeight;
     private bool _sanitizingSeats;
     private Task CheckAndGuideToRouteAsync() => Task.CompletedTask;
     private readonly Label _measure = new() { IsVisible = false };
-    private static readonly Color RouteTextVisible = Colors.White;                 // show when NOT editing
-    private static readonly Color RouteTextGhost   = Color.FromArgb("#01FFFFFF");  // almost transparent while editing
+    private static readonly Color RouteTextVisible = Colors.White;
+    private static readonly Color RouteTextGhost   = Color.FromArgb("#01FFFFFF");
     private IGeoJsonProvider? _geo;
+    private string _currentSuggestion = string.Empty; // Track current suggestion
+    
     private IGeoJsonProvider GeoProvider =>
         _geo ??= (Application.Current?.Handler?.MauiContext?.Services
                     .GetService<IGeoJsonProvider>()
                 ?? throw new InvalidOperationException("IGeoJsonProvider not registered."));
 
-
     private readonly List<string> _routeDictionary = new()
     {
-        "Bago Aplaya", "Bankal", "Barrio Obrero", "Buhangin Via Dacudao", "Buhangin Via JP. Laurel", "Bunawan Via Buhangin", "Bunawan Via Sasa",
+        "Bago Aplaya", "Bangkal", "Barrio Obrero", "Buhangin Via Dacudao", "Buhangin Via JP. Laurel", "Bunawan Via Buhangin", "Bunawan Via Sasa",
         "Calinan", "Camp Catitipan Via JP. Laurel", "Catalunan Grande", "Ecoland", "El Rio", "Toril"
     };
 
@@ -57,7 +58,7 @@ public partial class Conductor : ContentPage
     {
         if (string.IsNullOrWhiteSpace(s)) return string.Empty;
         var t = s.Trim().ToLowerInvariant();
-        t = Regex.Replace(t, @"[^\p{L}\p{Nd}\s_-]", ""); // keep letters/digits/space/_/-
+        t = Regex.Replace(t, @"[^\p{L}\p{Nd}\s_-]", "");
         t = Regex.Replace(t, @"[\s_]+", "-");
         t = Regex.Replace(t, "-{2,}", "-").Trim('-');
         return t;
@@ -69,11 +70,10 @@ public partial class Conductor : ContentPage
         _passengerCount = Math.Min(Math.Max(_passengerCount, 0), _capacity);
         UpdatePassengerUI();
 
-        BottomSheet.IsVisible = false;   // hide the modal sheet
-        PassengerBar.IsVisible = true;   // show the 3-square bar
+        BottomSheet.IsVisible = false;
+        PassengerBar.IsVisible = true;
     }
 
-    // In your click handler:
     private async void OnBiyaheClicked(object sender, EventArgs e)
     {
         var route = (RouteEntry.Text ?? string.Empty).Trim();
@@ -84,24 +84,39 @@ public partial class Conductor : ContentPage
             return;
         }
 
-        await LoadAndRenderRouteAsync(route.ToUpperInvariant());
+        var routeUpper = route.ToUpperInvariant();
+        
+        var routeExists = _routeDictionary.Any(r => 
+            r.Equals(routeUpper, StringComparison.OrdinalIgnoreCase));
+        
+        if (!routeExists)
+        {
+            await DisplayAlert("Route Not Available", 
+                $"The route '{routeUpper}' is not available. Please select a valid route.", "OK");
+            return;
+        }
+
+        var loaded = await LoadAndRenderRouteAsync(routeUpper);
+        if (!loaded)
+        {
+            await DisplayAlert("Route Load Failed", 
+                $"The route '{routeUpper}' could not be loaded. Please try again or contact support.", "OK");
+            return;
+        }
+
         SwapToPassengerBar();
         Dispatcher.Dispatch(() => UpdateRecenterPosition());
-        await RecenterToUserAsync(); // same behavior as recenter tap
+        await RecenterToUserAsync();
     }
-
-
 
     public Conductor()
     {
         InitializeComponent();
         Loaded += OnPageLoaded;
 
-        // keep inline suggestion refresh
         RouteEntry.SizeChanged += (_, __) =>
             ShowInlineSuggestion(RouteEntry.Text ?? string.Empty);
 
-        // bottom sheet sizing (existing)
         BottomSheet.SizeChanged += (_, __) =>
         {
             if (_expandedHeight <= 0 && BottomSheet.Height > 0)
@@ -113,11 +128,8 @@ public partial class Conductor : ContentPage
         };
         BottomSheet.SizeChanged += BottomSheet_FirstMeasuredOnce;
 
-        // NEW: keep recenter button above PassengerBar too
         PassengerBar.SizeChanged += (_, __) => UpdateRecenterPosition();
     }
-
-
 
     private void UpdateRecenterPosition(double gap = 12)
     {
@@ -136,7 +148,6 @@ public partial class Conductor : ContentPage
 
         RecenterButton.Margin = new Thickness(0, 0, 12, offset + gap);
     }
-
 
     private void BottomSheet_FirstMeasuredOnce(object? sender, EventArgs e)
     {
@@ -159,94 +170,111 @@ public partial class Conductor : ContentPage
         _measure.FontAttributes = RouteEntry.FontAttributes;
         _measure.CharacterSpacing = RouteEntry.CharacterSpacing;
 
-        // In MAUI this returns Size (not SizeRequest)
         var size = _measure.Measure(double.PositiveInfinity, double.PositiveInfinity);
         return size.Width;
     }
 
     private void EnterRouteEditMode()
     {
-        RouteEntry.TextColor = RouteTextGhost; // keep caret visible, hide Entry text
+        // Make Entry text nearly invisible so overlay shows through
+        RouteEntry.TextColor = Color.FromArgb("#01FFFFFF");
         var typedUpper = (RouteEntry.Text ?? string.Empty).ToUpperInvariant();
-        UpdateRouteOverlay(typedUpper);        // overlay renders visible text
+        ShowInlineSuggestion(typedUpper);
     }
 
     private void LeaveRouteEditMode()
     {
-        // Make the Entry text itself visible when not focused
         if (!string.IsNullOrEmpty(RouteEntry.Text))
-            RouteEntry.Text = RouteEntry.Text.ToUpperInvariant(); // keep style consistent
+            RouteEntry.Text = RouteEntry.Text.ToUpperInvariant();
 
         RouteEntry.TextColor = RouteTextVisible;
         RouteOverlay.IsVisible = false;
         RouteOverlay.FormattedText = null;
+        _currentSuggestion = string.Empty;
     }
     
     private void ShowInlineSuggestion(string typed)
     {
-        var match = _routeDictionary.FirstOrDefault(r =>
-            r.StartsWith(typed ?? string.Empty, StringComparison.OrdinalIgnoreCase));
-
-        RouteOverlay.IsVisible = false;
-        if (string.IsNullOrEmpty(typed) && string.IsNullOrEmpty(match)) { RouteOverlay.FormattedText = null; return; }
-
-        var fs = new FormattedString();
-        if (!string.IsNullOrEmpty(typed)) fs.Spans.Add(new Span { Text = typed, TextColor = Colors.White });
-        if (!string.IsNullOrEmpty(match) && typed.Length < match.Length)
-            fs.Spans.Add(new Span { Text = match.Substring(typed.Length), TextColor = Color.FromArgb("#66FFFFFF") });
-
-        RouteOverlay.FormattedText = fs.Spans.Count > 0 ? fs : null;
-        RouteOverlay.IsVisible = fs.Spans.Count > 0;
-    }
-    
-    private void UpdateRouteOverlay(string typedUpper)
-    {
-        // Hide if empty — no auto "EL RIO" on focus
-        if (string.IsNullOrEmpty(typedUpper))
+        try
         {
             RouteOverlay.IsVisible = false;
             RouteOverlay.FormattedText = null;
-            return;
-        }
+            _currentSuggestion = string.Empty;
 
-        var fs = new FormattedString();
-        // Typed part: bold, solid white
-        fs.Spans.Add(new Span { Text = typedUpper, TextColor = Colors.White, FontAttributes = FontAttributes.Bold });
+            if (string.IsNullOrEmpty(typed))
+            {
+                // No text typed, make Entry visible again
+                RouteEntry.TextColor = Colors.White;
+                return;
+            }
 
-        // Suggest ONLY after first letter
-        if (typedUpper.Length == 1)
-        {
+            var typedUpper = typed.ToUpperInvariant();
             var match = _routeDictionary.FirstOrDefault(r =>
                 r.StartsWith(typedUpper, StringComparison.OrdinalIgnoreCase));
 
-            if (!string.IsNullOrEmpty(match) && match.Length > 1)
+            if (string.IsNullOrEmpty(match) || typedUpper.Length >= match.Length)
             {
-                var remaining = match.Substring(1).ToUpperInvariant(); // ALL CAPS
-                fs.Spans.Add(new Span
-                {
-                    Text = remaining,
-                    TextColor = Color.FromArgb("#B3FFFFFF"), // 70% white
-                    FontAttributes = FontAttributes.Bold
-                });
+                // No suggestion or fully typed, show Entry text normally
+                RouteEntry.TextColor = Colors.White;
+                RouteOverlay.IsVisible = false;
+                return;
             }
-        }
 
-        RouteOverlay.FormattedText = fs;
-        RouteOverlay.IsVisible = true;
+            _currentSuggestion = match.ToUpperInvariant();
+
+            // Make Entry text invisible so overlay shows
+            RouteEntry.TextColor = Color.FromArgb("#01FFFFFF");
+
+            // Show typed part + suggestion together (BOLD)
+            var remaining = match.Substring(typedUpper.Length).ToUpperInvariant();
+            var fs = new FormattedString();
+            
+            // Show the full text: typed part (white, bold) + remaining (ghost, bold)
+            fs.Spans.Add(new Span 
+            { 
+                Text = typedUpper, 
+                TextColor = Colors.White,
+                FontAttributes = FontAttributes.Bold 
+            });
+            fs.Spans.Add(new Span 
+            { 
+                Text = remaining, 
+                TextColor = Color.FromArgb("#66FFFFFF"),
+                FontAttributes = FontAttributes.Bold 
+            });
+
+            RouteOverlay.FormattedText = fs;
+            RouteOverlay.IsVisible = true;
+        }
+        catch
+        {
+            // Silently fail to prevent freezing
+            RouteOverlay.IsVisible = false;
+            RouteEntry.TextColor = Colors.White;
+        }
     }
+
+    private bool _isUpdatingRouteText = false;
 
     private void OnRouteTextChanged(object sender, TextChangedEventArgs e)
     {
-        if (sender != RouteEntry) return;
+        if (sender != RouteEntry || _isUpdatingRouteText) return;
 
-        // never mutate entry.Text here; just update the overlay
-        var typedUpper = (e.NewTextValue ?? string.Empty).ToUpperInvariant();
-        UpdateRouteOverlay(typedUpper);
+        var newText = (e.NewTextValue ?? string.Empty).ToUpperInvariant();
+        if (newText != e.NewTextValue)
+        {
+            _isUpdatingRouteText = true;
+            RouteEntry.Text = newText;
+            _isUpdatingRouteText = false;
+            return;
+        }
+
+        // Refresh suggestion on every keystroke
+        ShowInlineSuggestion(newText);
     }
 
     private async void OnGrabberTapped(object? sender, TappedEventArgs e)
     {
-        // Never hide the sheet in this handler — only resize it.
         if (_expandedHeight <= 0)
         {
             var measured = BottomSheet.Height > 0 ? BottomSheet.Height : BottomSheet.HeightRequest;
@@ -257,7 +285,7 @@ public partial class Conductor : ContentPage
         if (!_isCollapsed)
         {
             _isCollapsed = true;
-            SheetContent.IsVisible = false; // keep grabber visible, hide body
+            SheetContent.IsVisible = false;
             await AnimateHeight(BottomSheet.Height, _collapsedHeight);
         }
         else
@@ -267,17 +295,15 @@ public partial class Conductor : ContentPage
             SheetContent.IsVisible = true;
         }
 
-        UpdateRecenterPosition();     // float button above current height
+        UpdateRecenterPosition();
         RouteOverlay.IsVisible = false;
     }
-
 
     private double ComputeCollapsedHeight()
     {
         var pad = BottomSheet.Padding;
         var grabberH = Grabber.Height > 0 ? Grabber.Height : Grabber.HeightRequest;
-        if (grabberH <= 0) grabberH = 8; // fallback matches your XAML
-        // leave a tappable strip for the grabber
+        if (grabberH <= 0) grabberH = 8;
         var collapsed = pad.Top + grabberH + pad.Bottom + 16;
         return Math.Max(collapsed, 56);
     }
@@ -290,14 +316,13 @@ public partial class Conductor : ContentPage
         return tcs.Task;
     }
 
-   // Update your handlers
     private void OnEntryFocused(object sender, FocusEventArgs e)
     {
         if (sender is Entry entry && string.IsNullOrEmpty(entry.Text))
             entry.Placeholder = string.Empty;
 
         if (sender == RouteEntry)
-            EnterRouteEditMode();   // only for RouteEntry
+            EnterRouteEditMode();
     }
 
     private void OnEntryUnfocused(object sender, FocusEventArgs e)
@@ -306,54 +331,45 @@ public partial class Conductor : ContentPage
             entry.Placeholder = entry == RouteEntry ? "CHOOSE ROUTE" : "MAX NO. OF SEATS";
 
         if (sender == RouteEntry)
-            LeaveRouteEditMode();   // show real text when you leave the field
+            LeaveRouteEditMode();
     }
 
     private async void OnRouteCompleted(object sender, EventArgs e)
     {
         if (sender is not Entry entry) return;
 
-        var typedUpper = (entry.Text ?? string.Empty).Trim().ToUpperInvariant();
-
-        // If they pressed Enter after 1st letter, commit suggestion first
-        if (typedUpper.Length == 1)
+        // Auto-fill with current suggestion when Enter is pressed
+        if (!string.IsNullOrEmpty(_currentSuggestion))
         {
-            var match = _routeDictionary.FirstOrDefault(r =>
-                r.StartsWith(typedUpper, StringComparison.OrdinalIgnoreCase));
-            if (!string.IsNullOrEmpty(match))
-            {
-                entry.Text = match.ToUpperInvariant();
-                UpdateRouteOverlay(entry.Text);
-                typedUpper = entry.Text;
-            }
+            entry.Text = _currentSuggestion;
+            RouteOverlay.IsVisible = false;
+            _currentSuggestion = string.Empty;
+            
+            // Optional: Load the route immediately
+            await LoadAndRenderRouteAsync(entry.Text);
         }
-
-        if (!string.IsNullOrWhiteSpace(typedUpper))
-            await LoadAndRenderRouteAsync(typedUpper);
-
-        // ❌ Do NOT swap UI here
     }
 
-
-    private async Task LoadAndRenderRouteAsync(string routeNameUpper)
+    private async Task<bool> LoadAndRenderRouteAsync(string routeNameUpper)
     {
         try
         {
             var slug = Slugify(routeNameUpper);
             var path = $"{StoragePrefix}{slug}.geojson";
 
-            if (_lastRenderedPath == path) return;
+            if (_lastRenderedPath == path) return true;
 
             var geojson = await GeoProvider.GetAsync(StorageBucket, path);
-            SimpleGeoJsonLineRenderer.Render(MyMap, geojson);  // orange line
+            SimpleGeoJsonLineRenderer.Render(MyMap, geojson);
             _lastRenderedPath = path;
+            return true;
         }
         catch (Exception ex)
         {
-            await DisplayAlert("Route", $"Couldn't load route:\n{ex.Message}", "OK");
+            System.Diagnostics.Debug.WriteLine($"Failed to load route: {ex.Message}");
+            return false;
         }
     }
-
 
     private void OnSeatsTextChanged(object sender, TextChangedEventArgs e)
     {
@@ -366,7 +382,6 @@ public partial class Conductor : ContentPage
         if (_passengerCount > _capacity) _passengerCount = _capacity;
         UpdatePassengerUI();
     }
-
 
     private async void OnDecrementTapped(object sender, TappedEventArgs e)
     {
@@ -392,7 +407,6 @@ public partial class Conductor : ContentPage
         }
     }
 
-    //Animation helpers
     private async Task BounceAsync(VisualElement v)
     {
         if (v == null) return;
@@ -401,7 +415,7 @@ public partial class Conductor : ContentPage
             await v.ScaleTo(0.92, 80, Easing.CubicOut);
             await v.ScaleTo(1.0, 120, Easing.CubicIn);
         }
-        catch { /* ignore if view disposed */ }
+        catch { }
     }
 
     private async Task PulseCountAsync()
@@ -411,9 +425,8 @@ public partial class Conductor : ContentPage
             await PassengerCountLabel.ScaleTo(1.08, 80, Easing.CubicOut);
             await PassengerCountLabel.ScaleTo(1.0, 120, Easing.CubicIn);
         }
-        catch { /* ignore if view disposed */ }
+        catch { }
     }
-
 
     private async Task RecenterToUserAsync(double kmRadius = 2)
     {
@@ -429,7 +442,6 @@ public partial class Conductor : ContentPage
                     new Location(location.Latitude, location.Longitude),
                     Distance.FromKilometers(kmRadius)));
 
-                // If you added the dotted-guide logic, keep it in sync:
                 await CheckAndGuideToRouteAsync();
             }
             else
@@ -445,12 +457,9 @@ public partial class Conductor : ContentPage
 
     private async void OnRecenterTapped(object? sender, TappedEventArgs e)
     {
-        await BounceAsync(RecenterButton);   // keep the tap animation
-        await RecenterToUserAsync();         // shared logic
+        await BounceAsync(RecenterButton);
+        await RecenterToUserAsync();
     }
-
-
-
 
     private async void OnPageLoaded(object? sender, EventArgs e)
     {
