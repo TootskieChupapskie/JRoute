@@ -1,5 +1,6 @@
 using Newtonsoft.Json;
 using System.Text;
+using Microsoft.Maui.Maps;
 
 namespace JRoute.Services;
 
@@ -136,6 +137,89 @@ public class GooglePlacesService
         }
     }
 
+    public async Task<List<Location>> GetDirectionsRouteAsync(Location origin, Location destination)
+    {
+        try
+        {
+            var url = $"https://maps.googleapis.com/maps/api/directions/json?" +
+                     $"origin={origin.Latitude},{origin.Longitude}&" +
+                     $"destination={destination.Latitude},{destination.Longitude}&" +
+                     $"mode=driving&" +
+                     $"key={ApiKey}";
+
+            using var response = await _httpClient.GetAsync(url);
+            if (!response.IsSuccessStatusCode)
+            {
+                System.Diagnostics.Debug.WriteLine($"Directions API request failed: {response.StatusCode}");
+                return new List<Location> { origin, destination };
+            }
+
+            var content = await response.Content.ReadAsStringAsync();
+            var result = JsonConvert.DeserializeObject<GoogleDirectionsResponse>(content);
+
+            if (result?.Routes?.Any() == true)
+            {
+                var route = result.Routes.First();
+                var points = new List<Location>();
+
+                foreach (var leg in route.Legs)
+                {
+                    foreach (var step in leg.Steps)
+                    {
+                        var decodedPoints = DecodePolyline(step.Polyline.Points);
+                        points.AddRange(decodedPoints);
+                    }
+                }
+
+                return points.Any() ? points : new List<Location> { origin, destination };
+            }
+
+            return new List<Location> { origin, destination };
+        }
+        catch (Exception ex)
+        {
+            System.Diagnostics.Debug.WriteLine($"Error getting directions: {ex.Message}");
+            return new List<Location> { origin, destination };
+        }
+    }
+
+    private List<Location> DecodePolyline(string encoded)
+    {
+        var points = new List<Location>();
+        if (string.IsNullOrEmpty(encoded)) return points;
+
+        int index = 0, len = encoded.Length;
+        int lat = 0, lng = 0;
+
+        while (index < len)
+        {
+            int b, shift = 0, result = 0;
+            do
+            {
+                b = encoded[index++] - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlat = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lat += dlat;
+
+            shift = 0;
+            result = 0;
+            do
+            {
+                b = encoded[index++] - 63;
+                result |= (b & 0x1f) << shift;
+                shift += 5;
+            } while (b >= 0x20);
+            int dlng = ((result & 1) != 0 ? ~(result >> 1) : (result >> 1));
+            lng += dlng;
+
+            points.Add(new Location(lat / 1E5, lng / 1E5));
+        }
+
+        return points;
+    }
+
     public void Dispose()
     {
         _httpClient?.Dispose();
@@ -195,4 +279,71 @@ public class GoogleLocation
 
     [JsonProperty("lng")]
     public double Lng { get; set; }
+}
+
+// Google Directions API Models
+public class GoogleDirectionsResponse
+{
+    [JsonProperty("routes")]
+    public List<GoogleDirectionsRoute>? Routes { get; set; }
+
+    [JsonProperty("status")]
+    public string? Status { get; set; }
+}
+
+public class GoogleDirectionsRoute
+{
+    [JsonProperty("legs")]
+    public List<GoogleDirectionsLeg> Legs { get; set; } = new();
+
+    [JsonProperty("overview_polyline")]
+    public GooglePolyline? OverviewPolyline { get; set; }
+}
+
+public class GoogleDirectionsLeg
+{
+    [JsonProperty("steps")]
+    public List<GoogleDirectionsStep> Steps { get; set; } = new();
+
+    [JsonProperty("distance")]
+    public GoogleDistance? Distance { get; set; }
+
+    [JsonProperty("duration")]
+    public GoogleDuration? Duration { get; set; }
+}
+
+public class GoogleDirectionsStep
+{
+    [JsonProperty("polyline")]
+    public GooglePolyline Polyline { get; set; } = new();
+
+    [JsonProperty("distance")]
+    public GoogleDistance? Distance { get; set; }
+
+    [JsonProperty("duration")]
+    public GoogleDuration? Duration { get; set; }
+}
+
+public class GooglePolyline
+{
+    [JsonProperty("points")]
+    public string Points { get; set; } = string.Empty;
+}
+
+public class GoogleDistance
+{
+    [JsonProperty("text")]
+    public string? Text { get; set; }
+
+    [JsonProperty("value")]
+    public int Value { get; set; }
+}
+
+public class GoogleDuration
+{
+    [JsonProperty("text")]
+    public string? Text { get; set; }
+
+    [JsonProperty("value")]
+    public int Value { get; set; }
 }

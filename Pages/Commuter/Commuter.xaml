@@ -111,13 +111,114 @@
             </Border>
         </StackLayout>
 
+        <!-- Bottom Sheet: edge-to-edge, rounded top only, no outline -->
+        <Border x:Name="BottomSheet"
+                ZIndex="1"
+                BackgroundColor="White"
+                Padding="30,20,30,20"
+                Margin="0"
+                HorizontalOptions="FillAndExpand"
+                VerticalOptions="End"
+                StrokeThickness="0">
+            <Border.StrokeShape>
+                <RoundRectangle CornerRadius="30,30,0,0" />
+            </Border.StrokeShape>
+
+            <VerticalStackLayout Spacing="0">
+                <!-- Grabber (only this toggles collapse/expand) -->
+                <BoxView x:Name="Grabber"
+                        HeightRequest="8"
+                        WidthRequest="56"
+                        HorizontalOptions="Center"
+                        CornerRadius="4"
+                        BackgroundColor="Gray"
+                        Margin="0,8,0,12">
+                    <BoxView.GestureRecognizers>
+                        <TapGestureRecognizer Tapped="OnGrabberTapped"/>
+                    </BoxView.GestureRecognizers>
+                </BoxView>
+
+                <BoxView HeightRequest="12" BackgroundColor="Transparent" />
+
+                <!-- Sheet body (hidden when collapsed) -->
+                <VerticalStackLayout x:Name="SheetContent" Spacing="20">
+
+                    <!-- Route Status Header -->
+                    <Label x:Name="RouteStatusLabel"
+                           Text="Default Route"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           TextColor="Black"
+                           HorizontalOptions="Center"
+                           Margin="0,0,0,10" />
+
+                    <!-- Main Content Grid -->
+                    <Grid ColumnDefinitions="*,*" RowDefinitions="Auto,Auto,Auto,Auto,Auto">
+                        
+                        <!-- Left Side: Fare Information -->
+                        <StackLayout Grid.Column="0" Spacing="8">
+                            <Label Text="Fare"
+                                   FontSize="16"
+                                   FontAttributes="Bold"
+                                   TextColor="Black"
+                                   HorizontalOptions="Center" />
+                            
+                            <StackLayout Spacing="4">
+                                <Label x:Name="StandardFareLabel"
+                                       Text="Standard: ₱13.00"
+                                       FontSize="14"
+                                       TextColor="#333"
+                                       HorizontalOptions="Center" />
+                                
+                                <Label x:Name="DiscountedFareLabel"
+                                       Text="Discounted: ₱10.40"
+                                       FontSize="14"
+                                       TextColor="#333"
+                                       HorizontalOptions="Center" />
+                            </StackLayout>
+                        </StackLayout>
+
+                        <!-- Right Side: Total Distance and Routes -->
+                        <StackLayout Grid.Column="1" Spacing="8">
+                            <Label Text="Total Distance"
+                                   FontSize="16"
+                                   FontAttributes="Bold"
+                                   TextColor="Black"
+                                   HorizontalOptions="Center" />
+                            
+                            <StackLayout x:Name="RouteDistanceContainer" Spacing="4">
+                                <Label x:Name="DefaultDistanceLabel"
+                                       Text="Default: 0.0 km"
+                                       FontSize="14"
+                                       TextColor="#333"
+                                       HorizontalOptions="Center" />
+                            </StackLayout>
+                        </StackLayout>
+
+                    </Grid>
+
+                    <!-- SAKAY Button -->
+                    <Button Text="SAKAY!"
+                            BackgroundColor="#007F3F"
+                            FontAttributes="Bold"
+                            TextColor="White"
+                            CornerRadius="30"
+                            WidthRequest="150"
+                            HorizontalOptions="Center"
+                            Margin="0,20,0,0" />
+
+                </VerticalStackLayout>
+
+            </VerticalStackLayout>
+        </Border>
+
         <!-- Recenter button (circular pin) -->
         <Border x:Name="RecenterButton"
                 ZIndex="2"
                 WidthRequest="56" HeightRequest="56"
                 BackgroundColor="White" StrokeThickness="0"
                 HorizontalOptions="End" VerticalOptions="End"
-                Margin="0,0,12,20">
+                Margin="0,0,12,12">
             <Border.StrokeShape>
                 <RoundRectangle CornerRadius="28"/>
             </Border.StrokeShape>
