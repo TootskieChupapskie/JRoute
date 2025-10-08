@@ -2,6 +2,7 @@ using JRoute.Models;
 using Microsoft.Maui.Maps;
 using Supabase;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace JRoute.Services;
@@ -72,13 +73,6 @@ public class RouteService
                 }
             }
 
-            // If no routes loaded from storage, add sample routes for testing
-            if (!_cachedRoutes.Any())
-            {
-                System.Diagnostics.Debug.WriteLine("No routes loaded from storage, adding sample routes for testing");
-                _cachedRoutes = GetSampleRoutes();
-            }
-            
             _lastCacheUpdate = DateTime.Now;
 
             System.Diagnostics.Debug.WriteLine($"Total loaded routes: {_cachedRoutes.Count}");
@@ -93,13 +87,6 @@ public class RouteService
         {
             System.Diagnostics.Debug.WriteLine($"Error fetching routes: {ex.Message}");
             System.Diagnostics.Debug.WriteLine($"Stack trace: {ex.StackTrace}");
-            
-            // Fallback to sample routes if everything fails
-            if (!_cachedRoutes.Any())
-            {
-                _cachedRoutes = GetSampleRoutes();
-            }
-            
             return _cachedRoutes;
         }
     }
@@ -160,30 +147,42 @@ public class RouteService
     {
         try
         {
-            var geoJson = JsonConvert.DeserializeObject<dynamic>(geoJsonContent);
             var points = new List<RoutePoint>();
+            if (string.IsNullOrWhiteSpace(geoJsonContent)) return points;
 
-            if (geoJson?.features != null)
+            var root = JToken.Parse(geoJsonContent);
+            var features = root["features"] as JArray;
+            if (features == null) return points;
+
+            foreach (var feature in features)
             {
-                foreach (var feature in geoJson.features)
+                var geometry = feature?["geometry"];
+                if (geometry == null) continue;
+
+                var type = geometry["type"]?.Value<string>();
+                if (!string.Equals(type, "LineString", StringComparison.OrdinalIgnoreCase)) continue;
+
+                var coordinates = geometry["coordinates"] as JArray;
+                if (coordinates == null) continue;
+
+                for (int i = 0; i < coordinates.Count; i++)
                 {
-                    if (feature?.geometry?.type == "LineString" && feature.geometry.coordinates != null)
+                    var coord = coordinates[i] as JArray;
+                    if (coord == null || coord.Count < 2) continue;
+
+                    var lonToken = coord[0];
+                    var latToken = coord[1];
+                    if (lonToken == null || latToken == null) continue;
+
+                    if (!double.TryParse(lonToken.ToString(), out var lon)) continue;
+                    if (!double.TryParse(latToken.ToString(), out var lat)) continue;
+
+                    points.Add(new RoutePoint
                     {
-                        var coordinates = feature.geometry.coordinates;
-                        for (int i = 0; i < coordinates.Count; i++)
-                        {
-                            var coord = coordinates[i];
-                            if (coord.Count >= 2)
-                            {
-                                points.Add(new RoutePoint
-                                {
-                                    Longitude = (double)coord[0],
-                                    Latitude = (double)coord[1],
-                                    Name = $"Point {i + 1}"
-                                });
-                            }
-                        }
-                    }
+                        Longitude = lon,
+                        Latitude = lat,
+                        Name = $"Point {i + 1}"
+                    });
                 }
             }
 
@@ -255,6 +254,916 @@ public class RouteService
         System.Diagnostics.Debug.WriteLine($"=== FINAL RESULT: {finalRoute.Segments.Count} segments, {finalRoute.TransferCount} transfers ===");
         return finalRoute;
     }
+
+	public async Task<List<ComputedRoute>> FindTopRoutesAsync(Location currentLocation, Location destination, int topN = 3)
+	{
+		System.Diagnostics.Debug.WriteLine("=== TOP ROUTES (Hitbox) ===");
+		System.Diagnostics.Debug.WriteLine($"From: {currentLocation.Latitude:F6},{currentLocation.Longitude:F6}");
+		System.Diagnostics.Debug.WriteLine($"To: {destination.Latitude:F6},{destination.Longitude:F6}");
+
+		// Load all routes once
+		var allRoutes = await GetAllRoutesAsync();
+		if (!allRoutes.Any())
+		{
+			var direct = await CreateDirectWalkingRoute(currentLocation, destination);
+			return new List<ComputedRoute> { direct };
+		}
+
+		// Guardrail: if a single route is very near both A and B, prefer it immediately
+		var nearRadius = 120.0;
+		var nearStartRoutes = FindRoutesWithinRadius(currentLocation, allRoutes, nearRadius);
+		var nearEndRoutes = FindRoutesWithinRadius(destination, allRoutes, nearRadius);
+		var singleCandidates = nearStartRoutes.Where(rs => nearEndRoutes.Any(re => re.Id == rs.Id)).ToList();
+		if (singleCandidates.Any())
+		{
+			foreach (var route in singleCandidates)
+			{
+				FindNearestPoint(currentLocation, route.Points, out int pIdx, out double _p);
+				FindNearestPoint(destination, route.Points, out int dIdx, out double _d);
+				if (pIdx < dIdx)
+				{
+					var single = new List<RouteMatch>
+					{
+						new RouteMatch
+						{
+							Route = route,
+							NearestPickupPoint = route.Points[pIdx],
+							NearestDropPoint = route.Points[dIdx],
+							PickupDistance = CalculateDistance(currentLocation, route.Points[pIdx].Location),
+							DropDistance = CalculateDistance(route.Points[dIdx].Location, destination),
+							PickupIndex = pIdx,
+							DropIndex = dIdx,
+							RouteOverlap = 1.0
+						}
+					};
+					var stitched = await FillGapsWithGoogleDirections(currentLocation, destination, single);
+					return new List<ComputedRoute> { stitched };
+				}
+			}
+		}
+
+		// Hitbox-first: expand radius until both A and B are near at least one route; then find a chain via route intersections
+		var hitboxCombos = FindChainsByExpandingHitbox(currentLocation, destination, allRoutes, Math.Max(1, topN));
+		if (hitboxCombos.Any())
+		{
+			var stitchedHitbox = new List<ComputedRoute>();
+			foreach (var combo in hitboxCombos)
+			{
+				var routed = await FillGapsWithGoogleDirections(currentLocation, destination, combo);
+				stitchedHitbox.Add(routed);
+			}
+			return stitchedHitbox;
+		}
+
+		// If no chains found at any radius, fall back to direct walking only
+		var fallback = await CreateDirectWalkingRoute(currentLocation, destination);
+		return new List<ComputedRoute> { fallback };
+	}
+
+	private List<List<RouteMatch>> FindChainsByExpandingHitbox(Location start, Location end, List<JeepneyRoute> routes, int topN)
+	{
+		// Expand hitbox up to 5km maximum
+		var radii = new[] { 100, 250, 500, 800, 1200, 1600, 2000, 2500, 3000, 4000, 5000 };
+		foreach (var radius in radii)
+		{
+			var nearStart = FindRoutesWithinRadius(start, routes, radius);
+			var nearEnd = FindRoutesWithinRadius(end, routes, radius);
+			System.Diagnostics.Debug.WriteLine($"Hitbox radius {radius}m → nearStart:{nearStart.Count}, nearEnd:{nearEnd.Count}");
+			if (!nearStart.Any() || !nearEnd.Any()) continue;
+
+			var chains = FindRouteChains(nearStart, nearEnd, routes);
+			if (chains.Any())
+			{
+				// Convert chains to route matches
+				var combos = new List<List<RouteMatch>>();
+				foreach (var chain in chains)
+				{
+					var combo = BuildMatchesForChain(start, end, chain);
+					if (combo.Any()) combos.Add(combo);
+				}
+				return combos
+					.OrderBy(c => CalculateTotalCombinationDistance(start, end, c))
+					.Take(topN)
+					.ToList();
+			}
+		}
+		return new List<List<RouteMatch>>();
+	}
+
+	private List<JeepneyRoute> FindRoutesWithinRadius(Location point, List<JeepneyRoute> routes, double radiusMeters)
+	{
+		var result = new List<JeepneyRoute>();
+		foreach (var r in routes)
+		{
+			if (!r.Points.Any()) continue;
+			var d = CalculatePointToPolylineDistanceMeters(point, r.Points);
+			if (d <= radiusMeters)
+			{
+				result.Add(r);
+			}
+		}
+		return result;
+	}
+
+	private List<List<JeepneyRoute>> FindRouteChains(List<JeepneyRoute> startRoutes, List<JeepneyRoute> endRoutes, List<JeepneyRoute> allRoutes)
+	{
+		// Build route graph: edge if any points between two routes are within transfer threshold
+		const double transferRadius = 700; // meters
+		var routeIndex = allRoutes.ToDictionary(r => r.Id, r => r);
+		var adj = new Dictionary<string, List<string>>();
+		foreach (var a in allRoutes)
+		{
+			for (int j = 0; j < allRoutes.Count; j++)
+			{
+				var b = allRoutes[j];
+				if (a.Id == b.Id) continue;
+				if (!adj.ContainsKey(a.Id)) adj[a.Id] = new();
+				if (RoutesAreNear(a, b, transferRadius))
+				{
+					adj[a.Id].Add(b.Id);
+				}
+			}
+		}
+
+		// BFS from each start route to any end route, collect a few shortest chains
+		var endSet = new HashSet<string>(endRoutes.Select(r => r.Id));
+		var chains = new List<List<JeepneyRoute>>();
+		foreach (var s in startRoutes)
+		{
+			var queue = new Queue<List<string>>();
+			queue.Enqueue(new List<string> { s.Id });
+			var visited = new HashSet<string> { s.Id };
+
+			while (queue.Count > 0 && chains.Count < 6)
+			{
+				var path = queue.Dequeue();
+				var last = path.Last();
+				if (endSet.Contains(last))
+				{
+					chains.Add(path.Select(id => routeIndex[id]).ToList());
+					continue;
+				}
+				if (!adj.TryGetValue(last, out var nexts)) continue;
+				foreach (var nx in nexts)
+				{
+					if (visited.Contains(nx)) continue;
+					if (path.Count >= 4) continue; // limit chain length to 4 routes
+					visited.Add(nx);
+					var newPath = new List<string>(path) { nx };
+					queue.Enqueue(newPath);
+				}
+			}
+		}
+
+		// Prefer shortest chains
+		return chains
+			.OrderBy(c => c.Count)
+			.Take(6)
+			.ToList();
+	}
+
+	private bool RoutesAreNear(JeepneyRoute a, JeepneyRoute b, double thresholdMeters)
+	{
+		if (!a.Points.Any() || !b.Points.Any()) return false;
+		var d1 = CalculatePolylineToPolylineDistanceMeters(a.Points, b.Points);
+		if (d1 <= thresholdMeters) return true;
+		return false;
+	}
+
+	private double CalculatePointToPolylineDistanceMeters(Location point, List<RoutePoint> polyline)
+	{
+		if (polyline.Count == 1)
+		{
+			return CalculateDistance(point, polyline[0].Location);
+		}
+		double minD = double.MaxValue;
+		for (int i = 0; i < polyline.Count - 1; i++)
+		{
+			var a = polyline[i].Location;
+			var b = polyline[i + 1].Location;
+			var d = CalculatePointToSegmentDistanceMeters(point, a, b);
+			if (d < minD) minD = d;
+		}
+		return minD;
+	}
+
+	private double CalculatePolylineToPolylineDistanceMeters(List<RoutePoint> a, List<RoutePoint> b)
+	{
+		// Sample both polylines and compute min point-to-segment distances
+		double minD = double.MaxValue;
+		for (int i = 0; i < a.Count - 1; i++)
+		{
+			var segA1 = a[i].Location;
+			var segA2 = a[i + 1].Location;
+			for (int j = 0; j < b.Count - 1; j++)
+			{
+				var d1 = CalculatePointToSegmentDistanceMeters(a[i].Location, b[j].Location, b[j + 1].Location);
+				if (d1 < minD) minD = d1;
+				var d2 = CalculatePointToSegmentDistanceMeters(b[j].Location, segA1, segA2);
+				if (d2 < minD) minD = d2;
+			}
+		}
+		return minD;
+	}
+
+	private double CalculatePointToSegmentDistanceMeters(Location p, Location a, Location b)
+	{
+		// Convert to a local flat coordinate system for small distances
+		double latRad = (a.Latitude + b.Latitude) * 0.5 * Math.PI / 180.0;
+		double metersPerDegLat = 111320.0;
+		double metersPerDegLon = 111320.0 * Math.Cos(latRad);
+
+		(double x, double y) ToXY(Location loc) => (
+			(loc.Longitude - a.Longitude) * metersPerDegLon,
+			(loc.Latitude - a.Latitude) * metersPerDegLat
+		);
+
+		var ap = ToXY(p);
+		var aa = (x: 0.0, y: 0.0);
+		var bb = ToXY(b);
+
+		var abx = bb.x - aa.x;
+		var aby = bb.y - aa.y;
+		var apx = ap.x - aa.x;
+		var apy = ap.y - aa.y;
+
+		var ab2 = abx * abx + aby * aby;
+		if (ab2 <= double.Epsilon)
+		{
+			var dx = apx;
+			var dy = apy;
+			return Math.Sqrt(dx * dx + dy * dy);
+		}
+
+		var t = (apx * abx + apy * aby) / ab2;
+		t = Math.Max(0, Math.Min(1, t));
+		var projx = aa.x + t * abx;
+		var projy = aa.y + t * aby;
+		var dxp = apx - projx;
+		var dyp = apy - projy;
+		return Math.Sqrt(dxp * dxp + dyp * dyp);
+	}
+
+	private List<RouteMatch> BuildMatchesForChain(Location start, Location end, List<JeepneyRoute> chain)
+	{
+		var matches = new List<RouteMatch>();
+		if (!chain.Any()) return matches;
+
+		// First route: pickup nearest to start, drop nearest to transfer to next route (or nearest to end if single)
+		var first = chain[0];
+		var pickupFirst = FindNearestPoint(start, first.Points, out int pIdx, out double walkToP);
+		int currentDropIdx = pIdx;
+		for (int r = 0; r < chain.Count; r++)
+		{
+			var currentRoute = chain[r];
+			int startIdx;
+			double walkGap;
+			if (r == 0)
+			{
+				startIdx = pIdx;
+				walkGap = walkToP;
+			}
+			else
+			{
+				FindNearestPoint(matches.Last().NearestDropPoint.Location, currentRoute.Points, out startIdx, out walkGap);
+			}
+
+			int endIdx;
+			if (r == chain.Count - 1)
+			{
+				FindNearestPoint(end, currentRoute.Points, out endIdx, out double _d);
+				if (endIdx <= startIdx) endIdx = Math.Min(currentRoute.Points.Count - 1, startIdx + 1);
+			}
+			else
+			{
+				// Drop where next route is closest
+				var nextRoute = chain[r + 1];
+				double best = double.MaxValue; endIdx = -1;
+				var step = Math.Max(1, currentRoute.Points.Count / 50);
+				for (int i = startIdx + 1; i < currentRoute.Points.Count; i += step)
+				{
+					var d = nextRoute.Points.Min(p => CalculateDistance(currentRoute.Points[i].Location, p.Location));
+					if (d < best)
+					{
+						best = d;
+						endIdx = i;
+					}
+				}
+				if (endIdx <= startIdx) endIdx = Math.Min(currentRoute.Points.Count - 1, startIdx + 1);
+			}
+
+			matches.Add(new RouteMatch
+			{
+				Route = currentRoute,
+				NearestPickupPoint = currentRoute.Points[startIdx],
+				NearestDropPoint = currentRoute.Points[endIdx],
+				PickupDistance = (r == 0) ? walkToP : CalculateDistance(matches.Last().NearestDropPoint.Location, currentRoute.Points[startIdx].Location),
+				DropDistance = (r == chain.Count - 1) ? CalculateDistance(currentRoute.Points[endIdx].Location, end) : 0,
+				PickupIndex = startIdx,
+				DropIndex = endIdx,
+				RouteOverlap = 1.0
+			});
+		}
+
+		return matches;
+	}
+
+	private List<RouteMatch> BuildGuaranteedSingle(Location start, Location end, List<JeepneyRoute> routes)
+	{
+		if (!routes.Any()) return new List<RouteMatch>();
+
+		// Nearest route to the user
+		var nearest = routes
+			.Select(r => new { Route = r, Pickup = FindNearestPoint(start, r.Points, out int idx, out double dist), PickupIdx = idx, WalkToPickup = dist })
+			.OrderBy(x => x.WalkToPickup)
+			.First();
+
+		var route = nearest.Route;
+		if (!route.Points.Any()) return new List<RouteMatch>();
+
+		// Choose drop as the index after pickup that is closest to destination; if none, last point
+		int dropIdx = -1;
+		double bestDist = double.MaxValue;
+		for (int i = Math.Min(nearest.PickupIdx + 1, route.Points.Count - 1); i < route.Points.Count; i++)
+		{
+			double d = CalculateDistance(route.Points[i].Location, end);
+			if (d < bestDist)
+			{
+				bestDist = d;
+				dropIdx = i;
+			}
+		}
+
+		if (dropIdx <= nearest.PickupIdx)
+		{
+			// If route is tiny or data odd, ride to the last point
+			dropIdx = route.Points.Count - 1;
+			bestDist = CalculateDistance(route.Points[dropIdx].Location, end);
+			if (dropIdx <= nearest.PickupIdx) return new List<RouteMatch>();
+		}
+
+		return new List<RouteMatch>
+		{
+			new RouteMatch
+			{
+				Route = route,
+				NearestPickupPoint = route.Points[nearest.PickupIdx],
+				NearestDropPoint = route.Points[dropIdx],
+				PickupDistance = nearest.WalkToPickup,
+				DropDistance = bestDist,
+				PickupIndex = nearest.PickupIdx,
+				DropIndex = dropIdx,
+				RouteOverlap = 1.0
+			}
+		};
+	}
+
+	private List<List<RouteMatch>> FindCombinationsFromNearestRoute(Location start, Location end, List<JeepneyRoute> routes, int topN)
+	{
+		if (!routes.Any()) return new List<List<RouteMatch>>();
+
+		// 1) Find nearest route to the user
+		var nearest = routes
+			.Select(r => new { Route = r, Pickup = FindNearestPoint(start, r.Points, out int idx, out double dist), PickupIdx = idx, WalkToPickup = dist })
+			.OrderBy(x => x.WalkToPickup)
+			.First();
+
+		var candidates = new List<(List<RouteMatch> Combo, double Score)>();
+
+		// Single-route candidate from nearest route
+		var (dropIdx0, dropPoint0, dropToDest0) = FindBestDropIndexTowardsDestination(nearest.Route, nearest.PickupIdx, end);
+		if (dropIdx0 > nearest.PickupIdx)
+		{
+			var single = new List<RouteMatch>
+			{
+				new RouteMatch
+				{
+					Route = nearest.Route,
+					NearestPickupPoint = nearest.Route.Points[nearest.PickupIdx],
+					NearestDropPoint = nearest.Route.Points[dropIdx0],
+					PickupDistance = nearest.WalkToPickup,
+					DropDistance = CalculateDistance(nearest.Route.Points[dropIdx0].Location, end),
+					PickupIndex = nearest.PickupIdx,
+					DropIndex = dropIdx0,
+					RouteOverlap = 1.0
+				}
+			};
+			var score = CalculateTotalCombinationDistance(start, end, single);
+			candidates.Add((single, score));
+		}
+
+		// Two-route candidates: splice nearest route with every other route
+		foreach (var r2 in routes)
+		{
+			if (r2.Id == nearest.Route.Id || !r2.Points.Any()) continue;
+
+			// For r2, choose best drop towards destination
+			var (_, r2BestDropPoint, _) = FindBestDropIndexTowardsDestination(r2, 0, end); // we'll refine index later
+
+			// Explore transfer points: iterate samples on nearest route after pickup and r2 before its best drop
+			var stepA = Math.Max(1, (nearest.Route.Points.Count - nearest.PickupIdx) / 30);
+			var stepB = Math.Max(1, r2.Points.Count / 30);
+
+			(int aBest, int bBest, double bridge) = (-1, -1, double.MaxValue);
+			for (int a = nearest.PickupIdx + 1; a < nearest.Route.Points.Count; a += stepA)
+			{
+				// For r2: allow any pickup index; but we will ensure order with its drop later
+				for (int b = 0; b < r2.Points.Count; b += stepB)
+				{
+					double gap = CalculateDistance(nearest.Route.Points[a].Location, r2.Points[b].Location);
+					if (gap < bridge)
+					{
+						bridge = gap;
+						aBest = a;
+						bBest = b;
+					}
+				}
+			}
+
+			if (aBest < 0 || bBest < 0) continue;
+
+			// For r2, find best drop after bBest towards destination
+			var (r2DropIdx, r2DropPoint, _) = FindBestDropIndexTowardsDestination(r2, bBest, end);
+			if (r2DropIdx <= bBest) continue;
+
+			var combo = new List<RouteMatch>
+			{
+				new RouteMatch
+				{
+					Route = nearest.Route,
+					NearestPickupPoint = nearest.Route.Points[nearest.PickupIdx],
+					NearestDropPoint = nearest.Route.Points[aBest],
+					PickupDistance = nearest.WalkToPickup,
+					DropDistance = bridge, // transfer gap; will be replaced by directions polyline later
+					PickupIndex = nearest.PickupIdx,
+					DropIndex = aBest,
+					RouteOverlap = 1.0
+				},
+				new RouteMatch
+				{
+					Route = r2,
+					NearestPickupPoint = r2.Points[bBest],
+					NearestDropPoint = r2.Points[r2DropIdx],
+					PickupDistance = bridge,
+					DropDistance = CalculateDistance(r2.Points[r2DropIdx].Location, end),
+					PickupIndex = bBest,
+					DropIndex = r2DropIdx,
+					RouteOverlap = 1.0
+				}
+			};
+
+			var score2 = CalculateTotalCombinationDistance(start, end, combo);
+			candidates.Add((combo, score2));
+		}
+
+		return candidates
+			.OrderBy(c => c.Score)
+			.Take(topN)
+			.Select(c => c.Combo)
+			.ToList();
+	}
+
+	private sealed class GraphNode
+	{
+		public string RouteId { get; init; } = string.Empty;
+		public int Index { get; init; }
+		public Location Location { get; init; } = new Location();
+	}
+
+	private List<List<RouteMatch>> FindTopRouteCombinationsWithGraph(Location start, Location end, List<JeepneyRoute> routes, int k)
+	{
+		var routeIdToRoute = routes.ToDictionary(r => r.Id, r => r);
+
+		// Start from the nearest route to the user
+		var nearestRoute = routes
+			.Select(r => new { Route = r, Nearest = FindNearestPoint(start, r.Points, out int idx, out double dist), Idx = idx, Dist = dist })
+			.OrderBy(x => x.Dist)
+			.FirstOrDefault();
+		if (nearestRoute == null) return new List<List<RouteMatch>>();
+
+		var startKey = (nearestRoute.Route.Id, nearestRoute.Idx);
+		const double finalWalkRadius = 1200; // meters
+		const double transferRadius = 2000; // meters
+
+		// Build adjacency: along-route edges + transfer edges between close points
+		var adjacency = new Dictionary<(string routeId, int idx), List<((string, int) to, double cost)>>();
+
+		// Along-route edges
+		foreach (var r in routes)
+		{
+			for (int i = 0; i < r.Points.Count - 1; i++)
+			{
+				var a = (r.Id, i);
+				var b = (r.Id, i + 1);
+				var cost = CalculateDistance(r.Points[i].Location, r.Points[i + 1].Location);
+				if (!adjacency.ContainsKey(a)) adjacency[a] = new();
+				adjacency[a].Add((b, cost));
+			}
+		}
+
+		// Transfer edges (downsampled for performance)
+		for (int i = 0; i < routes.Count; i++)
+		{
+			for (int j = i + 1; j < routes.Count; j++)
+			{
+				var r1 = routes[i];
+				var r2 = routes[j];
+				var step1 = Math.Max(1, r1.Points.Count / 50);
+				var step2 = Math.Max(1, r2.Points.Count / 50);
+				for (int a = 0; a < r1.Points.Count; a += step1)
+				{
+					for (int b = 0; b < r2.Points.Count; b += step2)
+					{
+						var d = CalculateDistance(r1.Points[a].Location, r2.Points[b].Location);
+						if (d <= transferRadius)
+						{
+							var key1 = (r1.Id, a);
+							var key2 = (r2.Id, b);
+							if (!adjacency.ContainsKey(key1)) adjacency[key1] = new();
+							if (!adjacency.ContainsKey(key2)) adjacency[key2] = new();
+							adjacency[key1].Add((key2, d));
+							adjacency[key2].Add((key1, d));
+						}
+					}
+				}
+			}
+		}
+
+		var results = new List<List<RouteMatch>>();
+		var penalties = new Dictionary<(string, int, string, int), double>();
+
+		for (int attempt = 0; attempt < k; attempt++)
+		{
+			var prev = RunDijkstraOnce(adjacency, routeIdToRoute, startKey, end, finalWalkRadius, penalties);
+			if (!prev.Any()) break;
+			var nodePath = ReconstructPath(prev);
+			var combo = ConvertNodePathToRouteMatches(nodePath, routeIdToRoute);
+			if (combo.Any())
+			{
+				results.Add(combo);
+				// Penalize used edges to diversify
+				for (int t = 0; t < nodePath.Count - 1; t++)
+				{
+					var e = (nodePath[t].RouteId, nodePath[t].Index, nodePath[t + 1].RouteId, nodePath[t + 1].Index);
+					penalties[e] = penalties.GetValueOrDefault(e, 0) + 500; // 500m extra
+				}
+			}
+			else
+			{
+				break;
+			}
+		}
+
+		return results;
+	}
+
+	private Dictionary<(string, int), (string, int)> RunDijkstraOnce(
+		Dictionary<(string, int), List<((string, int) to, double cost)>> adjacency,
+		Dictionary<string, JeepneyRoute> routeMap,
+		(string, int) startKey,
+		Location dest,
+		double finalWalkRadius,
+		Dictionary<(string, int, string, int), double> penalties)
+	{
+		var dist = new Dictionary<(string, int), double>();
+		var prev = new Dictionary<(string, int), (string, int)>();
+		var visited = new HashSet<(string, int)>();
+		var cmp = Comparer<(double d, string r, int i)>.Create((a, b) => a.d != b.d ? a.d.CompareTo(b.d) : (a.r != b.r ? string.CompareOrdinal(a.r, b.r) : a.i.CompareTo(b.i)));
+		var pq = new SortedSet<(double d, string r, int i)>(cmp);
+
+		dist[startKey] = 0;
+		pq.Add((0, startKey.Item1, startKey.Item2));
+
+		(string, int) bestGoal = default;
+		double bestGoalDist = double.MaxValue;
+
+		while (pq.Count > 0)
+		{
+			var current = pq.Min; pq.Remove(current);
+			var key = (current.r, current.i);
+			if (visited.Contains(key)) continue;
+			visited.Add(key);
+
+			var nodeLoc = routeMap[key.Item1].Points[key.Item2].Location;
+			var toDest = CalculateDistance(nodeLoc, dest);
+			if (toDest <= finalWalkRadius)
+			{
+				bestGoal = key;
+				bestGoalDist = current.d;
+				break;
+			}
+
+			if (!adjacency.TryGetValue(key, out var edges)) continue;
+			foreach (var edge in edges)
+			{
+				var pen = penalties.GetValueOrDefault((key.Item1, key.Item2, edge.to.Item1, edge.to.Item2), 0);
+				var nd = current.d + edge.cost + pen;
+				if (!dist.TryGetValue(edge.to, out var old) || nd < old)
+				{
+					dist[edge.to] = nd;
+					prev[edge.to] = key;
+					pq.Add((nd, edge.to.Item1, edge.to.Item2));
+				}
+			}
+		}
+
+		if (bestGoalDist == double.MaxValue) return new Dictionary<(string, int), (string, int)>();
+
+		// Trim prev to goal path only
+		var trimmed = new Dictionary<(string, int), (string, int)>();
+		var cur = bestGoal;
+		while (prev.ContainsKey(cur))
+		{
+			var p = prev[cur];
+			trimmed[cur] = p;
+			cur = p;
+		}
+		return trimmed;
+	}
+
+	private List<GraphNode> ReconstructPath(Dictionary<(string, int), (string, int)> prev)
+	{
+		var path = new List<GraphNode>();
+		if (!prev.Any()) return path;
+		var last = prev.Keys.First();
+		while (prev.ContainsKey(last))
+		{
+			var p = prev[last];
+			path.Add(new GraphNode { RouteId = last.Item1, Index = last.Item2 });
+			last = p;
+		}
+		path.Add(new GraphNode { RouteId = last.Item1, Index = last.Item2 });
+		path.Reverse();
+		return path;
+	}
+
+	private List<RouteMatch> ConvertNodePathToRouteMatches(List<GraphNode> nodePath, Dictionary<string, JeepneyRoute> routeMap)
+	{
+		var matches = new List<RouteMatch>();
+		if (nodePath.Count < 2) return matches;
+
+		string currentRouteId = nodePath[0].RouteId;
+		int startIdx = nodePath[0].Index;
+		int lastIdx = startIdx;
+
+		for (int i = 1; i < nodePath.Count; i++)
+		{
+			var n = nodePath[i];
+			if (n.RouteId == currentRouteId)
+			{
+				lastIdx = n.Index;
+			}
+			else
+			{
+				if (lastIdx > startIdx)
+				{
+					var route = routeMap[currentRouteId];
+					matches.Add(new RouteMatch
+					{
+						Route = route,
+						NearestPickupPoint = route.Points[startIdx],
+						NearestDropPoint = route.Points[lastIdx],
+						PickupDistance = 0,
+						DropDistance = 0,
+						PickupIndex = startIdx,
+						DropIndex = lastIdx,
+						RouteOverlap = 1.0
+					});
+				}
+				currentRouteId = n.RouteId;
+				startIdx = n.Index;
+				lastIdx = n.Index;
+			}
+		}
+
+		if (lastIdx > startIdx)
+		{
+			var route = routeMap[currentRouteId];
+			matches.Add(new RouteMatch
+			{
+				Route = route,
+				NearestPickupPoint = route.Points[startIdx],
+				NearestDropPoint = route.Points[lastIdx],
+				PickupDistance = 0,
+				DropDistance = 0,
+				PickupIndex = startIdx,
+				DropIndex = lastIdx,
+				RouteOverlap = 1.0
+			});
+		}
+
+		return matches;
+	}
+
+	private List<RouteMatch> BuildApproximateCombination(Location start, Location end, List<JeepneyRoute> routes)
+	{
+		// More permissive chaining: allow farther pickups/transfers and approximate last-mile with directions
+		const double pickupRadius = 2500; // meters
+		const double transferRadius = 2500; // meters
+		const double minProgress = 400; // meters closer to destination per segment
+		const int maxSegments = 4;
+
+		var current = start;
+		var used = new HashSet<string>();
+		var chain = new List<RouteMatch>();
+
+		for (int seg = 0; seg < maxSegments; seg++)
+		{
+			RouteMatch? best = null;
+			double bestDropToDest = double.MaxValue;
+
+			foreach (var route in routes)
+			{
+				if (used.Contains(route.Id) || !route.Points.Any()) continue;
+
+				// Nearest pickup to current, must be within pickupRadius
+				var pickup = FindNearestPoint(current, route.Points, out int pickupIdx, out double pickupDist);
+				if (pickupDist > pickupRadius) continue;
+
+				// Choose drop along the route after pickup that gets closest to the destination
+				var (dropIdx, dropPoint, dropToDest) = FindBestDropIndexTowardsDestination(route, pickupIdx, end);
+				if (dropIdx <= pickupIdx) continue;
+
+				// For transfers after first segment, ensure transfer gap is within transferRadius
+				if (chain.Any())
+				{
+					var prevDrop = chain.Last().NearestDropPoint.Location;
+					var transferGap = CalculateDistance(prevDrop, pickup.Location);
+					if (transferGap > transferRadius) continue;
+				}
+
+				// Ensure this segment makes meaningful progress toward the destination
+				var currentToDest = CalculateDistance(current, end);
+				if (currentToDest - dropToDest < minProgress) continue;
+
+				if (dropToDest < bestDropToDest)
+				{
+					bestDropToDest = dropToDest;
+					best = new RouteMatch
+					{
+						Route = route,
+						NearestPickupPoint = pickup,
+						NearestDropPoint = dropPoint,
+						PickupDistance = pickupDist,
+						DropDistance = dropToDest, // used only for ranking later
+						PickupIndex = pickupIdx,
+						DropIndex = dropIdx,
+						RouteOverlap = 0.0
+					};
+				}
+			}
+
+			if (best == null) break;
+
+			chain.Add(best);
+			used.Add(best.Route.Id);
+			current = best.NearestDropPoint.Location;
+
+			// Stop early if very close to destination
+			if (CalculateDistance(current, end) <= 600) break;
+		}
+
+		return chain;
+	}
+
+	private (int dropIndex, RoutePoint dropPoint, double dropToDestination) FindBestDropIndexTowardsDestination(JeepneyRoute route, int pickupIndex, Location destination)
+	{
+		int bestIdx = -1;
+		RoutePoint? bestPoint = null;
+		double bestDist = double.MaxValue;
+
+		for (int i = pickupIndex + 1; i < route.Points.Count; i++)
+		{
+			var rp = route.Points[i];
+			var d = CalculateDistance(rp.Location, destination);
+			if (d < bestDist)
+			{
+				bestDist = d;
+				bestIdx = i;
+				bestPoint = rp;
+			}
+		}
+
+		return bestIdx >= 0 && bestPoint != null
+			? (bestIdx, bestPoint, bestDist)
+			: (pickupIndex, route.Points[pickupIndex], CalculateDistance(route.Points[pickupIndex].Location, destination));
+	}
+
+	private RouteMatch? BuildRelaxedSingle(Location start, Location end, List<JeepneyRoute> routes)
+	{
+		// Completely relax walking radii; pick the single route that minimizes overall distance
+		RouteMatch? best = null;
+		double bestScore = double.MaxValue;
+		foreach (var route in routes)
+		{
+			if (!route.Points.Any()) continue;
+			var pickup = FindNearestPoint(start, route.Points, out int pIdx, out double pDist);
+			var (dIdx, drop, _) = FindBestDropIndexTowardsDestination(route, pIdx, end);
+			if (dIdx <= pIdx) continue;
+			var total = pDist + CalculateRouteSegmentDistance(route, pIdx, dIdx) + CalculateDistance(drop.Location, end);
+			if (total < bestScore)
+			{
+				bestScore = total;
+				best = new RouteMatch
+				{
+					Route = route,
+					NearestPickupPoint = pickup,
+					NearestDropPoint = drop,
+					PickupDistance = pDist,
+					DropDistance = CalculateDistance(drop.Location, end),
+					PickupIndex = pIdx,
+					DropIndex = dIdx,
+					RouteOverlap = 0.0
+				};
+			}
+		}
+		return best;
+	}
+
+	private List<RouteMatch> BuildSimpleTwoRouteBridge(Location start, Location end, List<JeepneyRoute> routes)
+	{
+		// Relaxed two-route bridge: choose route A closest to start and route B closest to end,
+		// then connect them at their closest pair of points with correct order.
+		var bestCombo = new List<RouteMatch>();
+		double bestScore = double.MaxValue;
+
+		for (int i = 0; i < routes.Count; i++)
+		{
+			var rA = routes[i];
+			if (!rA.Points.Any()) continue;
+			var pickupA = FindNearestPoint(start, rA.Points, out int pAIdx, out double pADist);
+
+			for (int j = 0; j < routes.Count; j++)
+			{
+				if (i == j) continue;
+				var rB = routes[j];
+				if (!rB.Points.Any()) continue;
+				var dropB = FindNearestPoint(end, rB.Points, out int dBIdx, out double dBDist);
+
+				// Find closest pair between rA after pickup and rB before drop
+				double bestBridge = double.MaxValue;
+				int bestAIdx = -1;
+				int bestBIdx = -1;
+				for (int a = pAIdx + 1; a < rA.Points.Count; a++)
+				{
+					for (int b = 0; b < dBIdx; b++)
+					{
+						double gap = CalculateDistance(rA.Points[a].Location, rB.Points[b].Location);
+						if (gap < bestBridge)
+						{
+							bestBridge = gap;
+							bestAIdx = a;
+							bestBIdx = b;
+						}
+					}
+				}
+
+				if (bestAIdx < 0 || bestBIdx < 0) continue;
+
+				var aDrop = rA.Points[bestAIdx];
+				var bPickup = rB.Points[bestBIdx];
+
+				// Total score: walk to A + ride A seg + bridge walk + ride B seg + walk to end
+				double score = pADist
+					+ CalculateRouteSegmentDistance(rA, pAIdx, bestAIdx)
+					+ bestBridge
+					+ CalculateRouteSegmentDistance(rB, bestBIdx, dBIdx)
+					+ dBDist;
+
+				if (score < bestScore)
+				{
+					bestScore = score;
+					bestCombo = new List<RouteMatch>
+					{
+						new RouteMatch
+						{
+							Route = rA,
+							NearestPickupPoint = pickupA,
+							NearestDropPoint = aDrop,
+							PickupDistance = pADist,
+							DropDistance = bestBridge,
+							PickupIndex = pAIdx,
+							DropIndex = bestAIdx,
+							RouteOverlap = 0.0
+						},
+						new RouteMatch
+						{
+							Route = rB,
+							NearestPickupPoint = bPickup,
+							NearestDropPoint = dropB,
+							PickupDistance = bestBridge,
+							DropDistance = dBDist,
+							PickupIndex = bestBIdx,
+							DropIndex = dBIdx,
+							RouteOverlap = 0.0
+						}
+					};
+				}
+			}
+		}
+
+		return bestCombo;
+	}
 
     private List<List<RouteMatch>> FindViableRoutesToDestination(Location currentLocation, Location destination, List<JeepneyRoute> allRoutes)
     {
@@ -1599,141 +2508,7 @@ public class RouteService
 
     private List<JeepneyRoute> GetSampleRoutes()
     {
-        System.Diagnostics.Debug.WriteLine("Creating sample routes for testing...");
-        return new List<JeepneyRoute>
-        {
-            new JeepneyRoute
-            {
-                Id = "el-rio-route",
-                Name = "El Rio Route",
-                Description = "El Rio via Matina-Ecoland route",
-                Fare = 15.0,
-                VehicleType = "Jeepney",
-                EstimatedDuration = TimeSpan.FromMinutes(45),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0644, Longitude = 125.5975, Name = "Bankerohan Terminal" },
-                    new RoutePoint { Latitude = 7.0680, Longitude = 125.6020, Name = "Roxas Avenue" },
-                    new RoutePoint { Latitude = 7.0720, Longitude = 125.6080, Name = "Davao Doctors Hospital" },
-                    new RoutePoint { Latitude = 7.0760, Longitude = 125.6140, Name = "Matina Crossing" },
-                    new RoutePoint { Latitude = 7.0800, Longitude = 125.6200, Name = "Matina Aplaya" },
-                    new RoutePoint { Latitude = 7.0840, Longitude = 125.6260, Name = "Ecoland Terminal" },
-                    new RoutePoint { Latitude = 7.0880, Longitude = 125.6320, Name = "El Rio Vista" },
-                    new RoutePoint { Latitude = 7.0920, Longitude = 125.6380, Name = "Communal Buhangin" },
-                    new RoutePoint { Latitude = 7.0960, Longitude = 125.6440, Name = "Buhangin Proper" },
-                    new RoutePoint { Latitude = 7.1000, Longitude = 125.6500, Name = "Buhangin Extension" }
-                }
-            },
-            new JeepneyRoute
-            {
-                Id = "maa-agdao-route",
-                Name = "Maa-Agdao Route", 
-                Description = "Maa to Agdao via downtown route",
-                Fare = 18.0,
-                VehicleType = "Jeepney",
-                EstimatedDuration = TimeSpan.FromMinutes(50),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0400, Longitude = 125.5800, Name = "Maa Terminal" },
-                    new RoutePoint { Latitude = 7.0450, Longitude = 125.5850, Name = "Maa Proper" },
-                    new RoutePoint { Latitude = 7.0500, Longitude = 125.5900, Name = "Shrine Hills" },
-                    new RoutePoint { Latitude = 7.0550, Longitude = 125.5950, Name = "Matina Pangi" },
-                    new RoutePoint { Latitude = 7.0600, Longitude = 125.6000, Name = "Matina Crossing" },
-                    new RoutePoint { Latitude = 7.0644, Longitude = 125.5975, Name = "Bankerohan" },
-                    new RoutePoint { Latitude = 7.0680, Longitude = 125.6020, Name = "Downtown Davao" },
-                    new RoutePoint { Latitude = 7.0720, Longitude = 125.6080, Name = "Quirino Avenue" },
-                    new RoutePoint { Latitude = 7.0760, Longitude = 125.6140, Name = "Agdao District" },
-                    new RoutePoint { Latitude = 7.0800, Longitude = 125.6200, Name = "Agdao Terminal" }
-                }
-            },
-            new JeepneyRoute
-            {
-                Id = "toril-downtown",
-                Name = "Toril-Downtown",
-                Description = "Toril to Downtown via McArthur Highway",
-                Fare = 20.0,
-                VehicleType = "Jeepney", 
-                EstimatedDuration = TimeSpan.FromMinutes(60),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0200, Longitude = 125.5500, Name = "Toril Terminal" },
-                    new RoutePoint { Latitude = 7.0250, Longitude = 125.5550, Name = "Toril Proper" },
-                    new RoutePoint { Latitude = 7.0300, Longitude = 125.5600, Name = "Mintal" },
-                    new RoutePoint { Latitude = 7.0350, Longitude = 125.5650, Name = "Tugbok District" },
-                    new RoutePoint { Latitude = 7.0400, Longitude = 125.5700, Name = "Catalunan Grande" },
-                    new RoutePoint { Latitude = 7.0450, Longitude = 125.5750, Name = "Catalunan Pequeño" },
-                    new RoutePoint { Latitude = 7.0500, Longitude = 125.5800, Name = "Tibungco" },
-                    new RoutePoint { Latitude = 7.0550, Longitude = 125.5850, Name = "Matina Pangi" },
-                    new RoutePoint { Latitude = 7.0600, Longitude = 125.5900, Name = "Matina Crossing" },
-                    new RoutePoint { Latitude = 7.0644, Longitude = 125.5975, Name = "Bankerohan" },
-                    new RoutePoint { Latitude = 7.0680, Longitude = 125.6000, Name = "Downtown Davao" }
-                }
-            },
-            new JeepneyRoute
-            {
-                Id = "buhangin-downtown",
-                Name = "Buhangin-Downtown",
-                Description = "Buhangin to Downtown via Panacan",
-                Fare = 15.0,
-                VehicleType = "Jeepney",
-                EstimatedDuration = TimeSpan.FromMinutes(40),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0960, Longitude = 125.6440, Name = "Buhangin Terminal" },
-                    new RoutePoint { Latitude = 7.0920, Longitude = 125.6380, Name = "Buhangin Proper" },
-                    new RoutePoint { Latitude = 7.0880, Longitude = 125.6320, Name = "Panacan" },
-                    new RoutePoint { Latitude = 7.0840, Longitude = 125.6260, Name = "Ecoland" },
-                    new RoutePoint { Latitude = 7.0800, Longitude = 125.6200, Name = "Matina Aplaya" },
-                    new RoutePoint { Latitude = 7.0760, Longitude = 125.6140, Name = "Matina Crossing" },
-                    new RoutePoint { Latitude = 7.0720, Longitude = 125.6080, Name = "Davao Doctors" },
-                    new RoutePoint { Latitude = 7.0680, Longitude = 125.6020, Name = "Roxas Avenue" },
-                    new RoutePoint { Latitude = 7.0644, Longitude = 125.5975, Name = "Bankerohan" },
-                    new RoutePoint { Latitude = 7.0680, Longitude = 125.6000, Name = "Downtown Davao" }
-                }
-            },
-            // Additional comprehensive routes for better coverage
-            new JeepneyRoute
-            {
-                Id = "comprehensive-north",
-                Name = "North Davao Comprehensive",
-                Description = "Comprehensive northern route covering Buhangin, Panacan, and surrounding areas",
-                Fare = 16.0,
-                VehicleType = "Jeepney",
-                EstimatedDuration = TimeSpan.FromMinutes(55),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0500, Longitude = 125.5800, Name = "South Starting Point" },
-                    new RoutePoint { Latitude = 7.0600, Longitude = 125.5900, Name = "Matina Area" },
-                    new RoutePoint { Latitude = 7.0700, Longitude = 125.6000, Name = "Central Davao" },
-                    new RoutePoint { Latitude = 7.0800, Longitude = 125.6100, Name = "Agdao Area" },
-                    new RoutePoint { Latitude = 7.0900, Longitude = 125.6200, Name = "Ecoland Area" },
-                    new RoutePoint { Latitude = 7.1000, Longitude = 125.6300, Name = "Buhangin Area" },
-                    new RoutePoint { Latitude = 7.1100, Longitude = 125.6400, Name = "Panacan Area" },
-                    new RoutePoint { Latitude = 7.1200, Longitude = 125.6500, Name = "North Extension" }
-                }
-            },
-            new JeepneyRoute
-            {
-                Id = "comprehensive-east-west",
-                Name = "East-West Comprehensive",
-                Description = "Comprehensive east-west route covering wide area",
-                Fare = 17.0,
-                VehicleType = "Jeepney",
-                EstimatedDuration = TimeSpan.FromMinutes(50),
-                Points = new List<RoutePoint>
-                {
-                    new RoutePoint { Latitude = 7.0700, Longitude = 125.5500, Name = "West Starting Point" },
-                    new RoutePoint { Latitude = 7.0720, Longitude = 125.5600, Name = "West Area 1" },
-                    new RoutePoint { Latitude = 7.0740, Longitude = 125.5700, Name = "West Area 2" },
-                    new RoutePoint { Latitude = 7.0760, Longitude = 125.5800, Name = "Central West" },
-                    new RoutePoint { Latitude = 7.0780, Longitude = 125.5900, Name = "Central" },
-                    new RoutePoint { Latitude = 7.0800, Longitude = 125.6000, Name = "Central East" },
-                    new RoutePoint { Latitude = 7.0820, Longitude = 125.6100, Name = "East Area 1" },
-                    new RoutePoint { Latitude = 7.0840, Longitude = 125.6200, Name = "East Area 2" },
-                    new RoutePoint { Latitude = 7.0860, Longitude = 125.6300, Name = "East Area 3" },
-                    new RoutePoint { Latitude = 7.0880, Longitude = 125.6400, Name = "Far East" }
-                }
-            }
-        };
+        // Samples removed to avoid non-database routes being suggested.
+        return new List<JeepneyRoute>();
     }
 }

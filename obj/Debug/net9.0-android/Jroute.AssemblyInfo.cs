@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("Jroute")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0+74de9592e0a6d84df72e54e08bf84fa969e689d1")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0+3190124414cfbd30f80dce897a98c61843a28d3a")]
 [assembly: System.Reflection.AssemblyProductAttribute("Jroute")]
 [assembly: System.Reflection.AssemblyTitleAttribute("Jroute")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

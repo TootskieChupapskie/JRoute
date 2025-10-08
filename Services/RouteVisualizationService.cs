@@ -37,6 +37,11 @@ public class RouteVisualizationService
         if (computedRoute.Segments.Any())
         {
             DisplaySegmentedRoute(computedRoute, userLocation);
+            // Also render detailed walking polylines from Directions API if present
+            if (computedRoute.WalkingSegments.Any())
+            {
+                DisplayWalkingRoute(computedRoute.WalkingSegments);
+            }
         }
         else if (computedRoute.WalkingSegments.Any())
         {
@@ -82,28 +87,12 @@ public class RouteVisualizationService
             // Draw route segment
             DrawRouteSegment(segment, color);
 
-            // Add pickup pin
-            AddRoutePin(segment.StartPoint, $"Pickup: {segment.Route.Name}", 
-                       $"Board here for {segment.Route.Name}", PinType.Place, Colors.Green);
+            // No extra pins: only render polylines; user/destination pins are managed elsewhere
 
-            // Add drop pin
-            AddRoutePin(segment.EndPoint, $"Drop: {segment.Route.Name}", 
-                       $"Get off here from {segment.Route.Name}", PinType.Place, Colors.Red);
-
-            // Add walking segment to next pickup (if not last segment)
-            if (i < computedRoute.Segments.Count - 1)
-            {
-                var nextSegment = computedRoute.Segments[i + 1];
-                DrawWalkingPath(segment.EndPoint.Location, nextSegment.StartPoint.Location);
-            }
+            // Do not draw straight lines for walking; detailed walking is rendered from WalkingSegments
         }
 
-        // Add walking segment from user to first pickup
-        if (computedRoute.Segments.Any())
-        {
-            var firstPickup = computedRoute.Segments.First().StartPoint.Location;
-            DrawWalkingPath(userLocation, firstPickup);
-        }
+        // Detailed walking to first pickup is included in WalkingSegments and rendered separately
     }
 
     private void DrawRouteSegment(RouteSegment segment, Color color)
@@ -160,9 +149,7 @@ public class RouteVisualizationService
             _map.MapElements.Add(walkingPolyline);
             _routePolylines.Add(walkingPolyline);
 
-            // Add walking pins
-            AddRoutePin(walkingSegments.First(), "Start Walking", "Begin your journey here", PinType.Place, Colors.Blue);
-            AddRoutePin(walkingSegments.Last(), "Walking Destination", "Your destination", PinType.Place, Colors.Red);
+            // Do not add walking pins; only the polyline path is rendered
         }
     }
 

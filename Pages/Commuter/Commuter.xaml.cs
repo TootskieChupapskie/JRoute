@@ -18,6 +18,7 @@ public partial class Commuter : ContentPage
     private CancellationTokenSource? _searchCancellationTokenSource;
     private Pin? _destinationPin;
     private ComputedRoute? _currentRoute;
+	private List<ComputedRoute>? _topRoutes;
     private bool _isBottomSheetExpanded = false; // Start collapsed
     private bool _hasDestination = false;
 
@@ -322,8 +323,9 @@ public partial class Commuter : ContentPage
             System.Diagnostics.Debug.WriteLine($"To: {destination.Latitude:F6}, {destination.Longitude:F6}");
             System.Diagnostics.Debug.WriteLine($"Direct distance: {Location.CalculateDistance(userLocation, destination, DistanceUnits.Kilometers):F2} km");
             
-            // Calculate optimal route
-            _currentRoute = await _routeService.FindOptimalRouteAsync(userLocation, destination);
+			// Calculate top route options and use the best one for display
+			_topRoutes = await _routeService.FindTopRoutesAsync(userLocation, destination, 3);
+			_currentRoute = _topRoutes?.FirstOrDefault();
             
             if (_currentRoute != null)
             {
@@ -549,9 +551,11 @@ public partial class Commuter : ContentPage
             UpdateGrabberAppearance();
             
             // Initialize with default content
+            await Task.Yield();
             UpdateBottomSheetInfo();
             
             // Set initial recenter button position
+            await Task.Yield();
             UpdateRecenterPosition();
         }
         catch (Exception ex)
